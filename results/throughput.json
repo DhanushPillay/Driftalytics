@@ -1,0 +1,20 @@
+[
+  {
+    "n": 1000,
+    "seconds": 0.0041,
+    "rows_per_sec": 244642.3,
+    "alerts": 0
+  },
+  {
+    "n": 10000,
+    "seconds": 0.0155,
+    "rows_per_sec": 646767.8,
+    "alerts": 0
+  },
+  {
+    "n": 100000,
+    "seconds": 0.0161,
+    "rows_per_sec": 6202512.0,
+    "alerts": 0
+  }
+]
