@@ -1,0 +1,45 @@
+{
+  "rows": 50000,
+  "window_size": 5000,
+  "seconds": 0.4994,
+  "rows_per_sec": 100118.4,
+  "windows": 10,
+  "alerts": 39,
+  "results": [
+    {
+      "monitor": "psi",
+      "score": 0.247744,
+      "threshold": 0.2,
+      "alert": true,
+      "status": "ok"
+    },
+    {
+      "monitor": "ks",
+      "score": 0.21986,
+      "threshold": 0.05,
+      "alert": true,
+      "status": "ok"
+    },
+    {
+      "monitor": "missing_rate",
+      "score": 0.1526,
+      "threshold": 0.05,
+      "alert": true,
+      "status": "ok"
+    },
+    {
+      "monitor": "cardinality",
+      "score": 3.375459,
+      "threshold": 0.1,
+      "alert": true,
+      "status": "ok"
+    },
+    {
+      "monitor": "drift_magnitude",
+      "score": 0.162379,
+      "threshold": 0.5,
+      "alert": false,
+      "status": "ok"
+    }
+  ]
+}
