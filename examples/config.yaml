@@ -1,0 +1,14 @@
+reference: reference.parquet
+data: live.parquet
+monitors: [psi, ks, missing_rate, cardinality, drift_magnitude]
+window_size: 1000
+stride: 500
+sliding: true
+include_partial: true
+# Fallback only. Monitors with their own threshold ignore this value.
+alert_threshold: 0.1
+# Optional JSON model from: python -m driftalytics.train_damage
+# damage_predictor: models/damage_predictor.json
+output:
+  html: drift_report.html
+  json: drift_report.json
