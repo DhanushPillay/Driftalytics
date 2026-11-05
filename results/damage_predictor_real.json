@@ -1,0 +1,23 @@
+{
+  "format": "driftalytics-damage-v1",
+  "feature_names": [
+    "drift_magnitude",
+    "missingness_delta",
+    "cardinality_shift",
+    "schema_change",
+    "volume_delta"
+  ],
+  "coef": [
+    4.265427769002886,
+    -0.5006134178760174,
+    0.054847444601576076,
+    0.0017854630716998277,
+    0.0
+  ],
+  "intercept": 0.005356389215093849,
+  "metrics": {
+    "mae": 0.20105640214637951,
+    "rmse": 0.295274303790914,
+    "r2": 0.3729239749297719
+  }
+}
