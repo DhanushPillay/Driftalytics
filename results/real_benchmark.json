@@ -1,0 +1,36 @@
+{
+  "rows": 50000,
+  "clean_model": {
+    "mae": 4.384780131207408,
+    "rmse": 11.227211462281439,
+    "r2": 0.7438571205237217
+  },
+  "detection": {
+    "clean_false_positive_rate": 0.0,
+    "corrupted_detection_rate": 1.0,
+    "clean_per_monitor": {
+      "psi": 0.0,
+      "ks": 0.0,
+      "wasserstein": 0.0,
+      "missing_rate": 0.0,
+      "cardinality": 0.0,
+      "drift_magnitude": 0.0
+    },
+    "corrupted_per_monitor": {
+      "psi": 1.0,
+      "ks": 1.0,
+      "wasserstein": 1.0,
+      "missing_rate": 1.0,
+      "cardinality": 0.0,
+      "drift_magnitude": 0.0
+    }
+  },
+  "damage_predictor": {
+    "scenarios": 26,
+    "train_rows": 18,
+    "test_rows": 8,
+    "mae": 0.25355887137166805,
+    "rmse": 0.31395388613114933,
+    "r2": 0.42994325214683293
+  }
+}
