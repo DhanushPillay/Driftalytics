@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "driftalytics"
-version = "0.3.0"
+version = "0.4.0"
 description = "Lightweight ML/LLM drift monitoring with early-warning damage prediction."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 parquet = ["pyarrow>=14"]
+bench = ["pyarrow>=14", "scikit-learn>=1.4"]
 dev = [
     "pyarrow>=14",
     "pytest>=8",
