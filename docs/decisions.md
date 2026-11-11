@@ -57,13 +57,25 @@ Core runtime: `numpy`, `pandas`, `scipy`, `pyyaml`. Development dependencies are
 The LLM judge uses the standard library HTTP client, so `openai` and `anthropic` SDKs are
 not required.
 
-## Synthetic and real benchmarks
+## Real-data benchmarks
 
-Throughput uses synthetic normal data for comparability across machines. Real evaluation
-uses NYC TLC yellow taxi trips with a linear fare model, injected corruptions, and held-out
-scenarios. The damage predictor is trained on simulated corruptions, not on production
-labels, so its error numbers describe that simulation. Real deployments should retrain on
-their own labeled outcomes.
+All tabular benchmarks use the Insects `incremental_abrupt_balanced` stream: 79,986 real
+optical-sensor measurements, 33 numeric features, and six classes. The row order is curated
+by the dataset authors to include incremental, abrupt, and reoccurring drift. It is real
+measurement data, not a calendar-time stream.
+
+The loader downloads the CSV on demand, verifies its SHA-256, and caches it under
+`data/raw/`. The dataset is not committed. Its CC BY 4.0 license is separate from the
+library's MIT license.
+
+Damage labels are observed chronological error increases from a classifier trained on the
+first 20,000 rows. The damage predictor uses a chronological split, not a random one. This
+keeps future windows out of training and matches how the monitor would be used in
+production.
+
+The stream exercises only `drift_magnitude` and `cardinality_shift`; missingness, schema,
+and volume stay constant. The benchmark therefore reports a drift-only ablation alongside
+the five-feature model. It does not claim that the unused dimensions are validated.
 
 ## Version 0.2 scope
 
@@ -101,3 +113,30 @@ The 0.3 release fixes defects that survived 0.2:
   early.
 - **Optional Parquet and CI.** `pyarrow` is an optional extra, and CI runs lint, format,
   types, and tests on Python 3.10 through 3.13.
+
+## Version 0.4 real-data benchmark
+
+The 0.4 release replaces synthetic benchmark input and simulated damage training with one
+public real dataset.
+
+- All tabular benchmarks use Insects `incremental_abrupt_balanced`. ELEC2 and Bike Sharing
+  were tested as alternatives, but both produced weak or negative damage predictability on
+  chronological holdouts. NYC TLC has real rows but no labels for actual performance damage.
+  Insects was the only candidate where the damage model beat the heuristic on future
+  windows.
+- The loader in `src/driftalytics/datasets.py` downloads the CSV on demand, verifies its
+  SHA-256, and caches it under `data/raw/`. The dataset is not committed.
+- Damage labels are observed chronological error increases from a logistic regression
+  trained on the first 20,000 rows.
+- The damage predictor uses a chronological 60/20/20 split. The five-feature model reaches
+  test MAE 0.0405 and R-squared 0.9525, against 0.1843 and 0.4198 for the untrained
+  heuristic.
+- Only `drift_magnitude` and `cardinality_shift` vary in the stream. The drift-only
+  ablation reaches test MAE 0.0385, so the benchmark validates those two dimensions and does
+  not validate missingness, schema, or volume.
+- The first reference block is already non-stationary. The benchmark reports precision and
+  recall against realized damage instead of a false-positive rate.
+- `make_synthetic`, `--n`, and `--seed` are removed. `train_damage` now requires `--data`
+  and uses a chronological split.
+- `scikit-learn` is a benchmark-only dependency in the new `bench` extra. Core runtime
+  dependencies are unchanged.
