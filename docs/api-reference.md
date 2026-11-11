@@ -58,10 +58,13 @@ SlidingWindowRunner(
 )
 ```
 
-- `reference`: DataFrame, parquet path, or CSV path.
+- `reference`: DataFrame, parquet path (requires `pyarrow`), or CSV path.
 - `monitors`: names, instances, or monitor classes.
 - `stride`: defaults to `window_size`.
 - `alert_threshold`: fallback for monitors without their own threshold.
+- `sliding`: `False` scores the whole input as one window; `True` emits stride windows.
+- `include_partial`: scores one trailing short window when data remains. Its expected size
+  is its actual row count.
 
 Methods:
 
@@ -69,19 +72,23 @@ Methods:
 - `update(batch, final=False) -> list[Report]`
 - `run_stream(batches) -> Iterator[Report]`
 
+Streaming tracks absolute offsets. Finalization emits at most one allowed partial window;
+a second finalization returns `[]`, and new data after finalization raises `RuntimeError`.
+
 ### `Report`
 
 Fields include `results`, `alerts`, `n_rows`, `n_rows_analyzed`, `n_rows_skipped`,
-`damage_estimate`, `damage_error`, `corruptions`, `n_windows`, and `window_summaries`.
+`damage_estimate`, `damage_error`, `corruptions`, `n_windows`, `window_summaries`, `start`,
+and `end`.
 
 - `summary() -> str`
 - `to_dict() -> dict`
-- `to_json(path) -> None`
-- `to_html(path) -> None`
+- `to_json(path) -> None` (non-finite values become `null`)
+- `to_html(path) -> None` (non-finite values render as `n/a`)
 
 ### `Alert`
 
-`monitor`, `score`, `threshold`, `timestamp`, `message`, `window`.
+`monitor`, `score`, `threshold`, `timestamp`, `message`, `window`, `start`, `end`.
 
 ## Corruption and damage
 
@@ -103,7 +110,11 @@ Fields: `drift_magnitude`, `missingness_delta`, `cardinality_shift`, `schema_cha
 - `save(path) -> None`
 - `load(path) -> DamagePredictor` (class method)
 
-Models are JSON with format `driftalytics-damage-v1`.
+Trained predictors expose `training_metrics_`, `validation_metrics_`, and `test_metrics_`.
+Models are JSON with format `driftalytics-damage-v1`; the saved `metrics` field mirrors
+`training_metrics` for backward compatibility. Loading validates the feature order,
+coefficient count, intercept, and metric finiteness. An untrained predictor uses fixed
+heuristic weights.
 
 ### Training helper
 
@@ -135,6 +146,7 @@ LLMJudge(
     timeout=60,
     retries=2,
     seed=0,
+    max_output_tokens=256,
 )
 ```
 
@@ -143,6 +155,11 @@ LLMJudge(
 Each result contains the requested metric keys plus `_status` and `_error`. Status values
 are `ok`, `cached`, `sampled`, `budget`, and `error`. Metric values are clamped to
 `[0, 1]`; unavailable values are `None`.
+
+The judge sends a separate system instruction and serializes question, context, and answer
+as a JSON data block. Cache entries include provider, model, metric list, and prompt version.
+The budget reserves estimated tokens before each request and charges failed calls. Providers
+receive `max_output_tokens` and validate their response shapes.
 
 Provider classes: `OpenAIProvider`, `AnthropicProvider`, `OllamaProvider`, and
 `make_provider(provider, model, ...)`.
@@ -157,4 +174,5 @@ driftalytics monitors
 
 Config keys: `reference`, `data`, `monitors`, `window_size`, `alert_threshold`,
 `damage_predictor`, `stride`, `sliding`, `include_partial`, and `output.html` /
-`output.json`.
+`output.json`. Boolean keys accept YAML booleans or `true`/`false` strings. Monitor names
+must be a non-empty list, and output paths must be strings.
