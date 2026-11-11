@@ -3,7 +3,9 @@ data: live.parquet
 monitors: [psi, ks, missing_rate, cardinality, drift_magnitude]
 window_size: 1000
 stride: 500
+# false scores the whole input as one window; true emits stride windows.
 sliding: true
+# Score one trailing short window using its actual row count.
 include_partial: true
 # Fallback only. Monitors with their own threshold ignore this value.
 alert_threshold: 0.1
