@@ -29,14 +29,18 @@ class Alert:
     timestamp: float = field(default_factory=time.time)
     message: str = ""
     window: int | None = None
+    start: int | None = None
+    end: int | None = None
 
 
-def _covered_rows(starts: list[int], window_size: int, n_rows: int) -> int:
+def _covered_rows(intervals: list[tuple[int, int]]) -> int:
     """Count rows covered by possibly overlapping windows."""
-    intervals = sorted((start, min(start + window_size, n_rows)) for start in starts)
+    if not intervals:
+        return 0
+    merged = sorted(intervals)
     total = 0
-    current_start, current_end = intervals[0]
-    for start, end in intervals[1:]:
+    current_start, current_end = merged[0]
+    for start, end in merged[1:]:
         if start <= current_end:
             current_end = max(current_end, end)
         else:
@@ -92,15 +96,16 @@ class SlidingWindowRunner:
         self.include_partial = include_partial
         self.expected_size = window_size if sliding else len(self.reference)
 
-        for monitor in self.monitors:
-            if hasattr(monitor, "expected_size") and monitor.expected_size is None:
-                monitor.expected_size = self.expected_size
-
         self._needs_corruption = damage_predictor is not None or any(
             getattr(m, "name", "") == "drift_magnitude" for m in self.monitors
         )
-        self._stream_buffer: pd.DataFrame | None = None
+        self._stream_buffer = pd.DataFrame()
+        self._stream_buffer_start = 0
+        self._stream_total = 0
+        self._stream_next_start = 0
+        self._stream_last_end = 0
         self._stream_window = 0
+        self._stream_finalized = False
 
     @staticmethod
     def _make_monitor(item: str | Monitor | type[Monitor]) -> Monitor:
@@ -115,7 +120,10 @@ class SlidingWindowRunner:
     def _run_one(
         self,
         batch_df: pd.DataFrame,
-        window: int | None = None,
+        window: int | None,
+        start: int,
+        end: int,
+        expected_size: int,
     ) -> tuple[list[MonitorResult], list[Alert], CorruptionVector | None, float | None, str | None]:
         if not isinstance(batch_df, pd.DataFrame):
             raise TypeError(f"batch must be a DataFrame, got {type(batch_df).__name__}")
@@ -124,7 +132,7 @@ class SlidingWindowRunner:
             compute_corruption_vector(
                 self.reference,
                 batch_df,
-                expected_size=self.expected_size,
+                expected_size=expected_size,
             )
             if self._needs_corruption
             else None
@@ -133,7 +141,10 @@ class SlidingWindowRunner:
         results: list[MonitorResult] = []
         alerts: list[Alert] = []
         for monitor in self.monitors:
+            previous_size = getattr(monitor, "expected_size", None)
             try:
+                if hasattr(monitor, "expected_size"):
+                    monitor.expected_size = expected_size
                 if corruption is not None and hasattr(monitor, "result_from_corruption"):
                     result = monitor.result_from_corruption(corruption)
                 else:
@@ -158,6 +169,9 @@ class SlidingWindowRunner:
                     status="error",
                     error=f"{type(exc).__name__}: {exc}",
                 )
+            finally:
+                if hasattr(monitor, "expected_size"):
+                    monitor.expected_size = previous_size
 
             results.append(result)
             if result.alert:
@@ -168,6 +182,8 @@ class SlidingWindowRunner:
                         threshold=result.threshold,
                         window=window,
                         message=result.error or "",
+                        start=start,
+                        end=end,
                     )
                 )
 
@@ -181,8 +197,17 @@ class SlidingWindowRunner:
 
         return results, alerts, corruption, damage, damage_error
 
-    def _run_window(self, chunk: pd.DataFrame, start: int, end: int, window: int) -> Report:
-        results, alerts, corruption, damage, damage_error = self._run_one(chunk, window)
+    def _run_window(
+        self,
+        chunk: pd.DataFrame,
+        start: int,
+        end: int,
+        window: int,
+        expected_size: int,
+    ) -> Report:
+        results, alerts, corruption, damage, damage_error = self._run_one(
+            chunk, window, start, end, expected_size
+        )
         summary = {
             "window": window,
             "start": start,
@@ -205,6 +230,28 @@ class SlidingWindowRunner:
             corruptions=[corruption] if corruption is not None else [],
             n_windows=1,
             window_summaries=[summary],
+            start=start,
+            end=end,
+        )
+
+    def _combine(self, reports: list[Report], n_rows: int) -> Report:
+        intervals = [(report.start, report.end) for report in reports]
+        covered = _covered_rows(intervals)
+        damage_values = [r.damage_estimate for r in reports if r.damage_estimate is not None]
+        damage_errors = [r.damage_error for r in reports if r.damage_error]
+        return Report(
+            results=reports[-1].results if reports else [],
+            alerts=[alert for report in reports for alert in report.alerts],
+            n_rows=n_rows,
+            n_rows_analyzed=covered,
+            n_rows_skipped=n_rows - covered,
+            damage_estimate=float(np.mean(damage_values)) if damage_values else None,
+            damage_error="; ".join(dict.fromkeys(damage_errors)) or None,
+            corruptions=[c for report in reports for c in report.corruptions],
+            n_windows=len(reports),
+            window_summaries=[summary for report in reports for summary in report.window_summaries],
+            start=reports[0].start if reports else 0,
+            end=reports[-1].end if reports else 0,
         )
 
     def run(self, data) -> Report:
@@ -212,59 +259,126 @@ class SlidingWindowRunner:
         if df.empty:
             return Report(n_rows=0, n_rows_analyzed=0, n_rows_skipped=0, n_windows=0)
 
-        if not self.sliding or len(df) <= self.window_size:
-            return self._run_window(df, 0, len(df), 0)
+        if not self.sliding:
+            report = self._run_window(df, 0, len(df), 0, len(self.reference))
+            return self._combine([report], len(df))
 
-        starts = list(range(0, len(df) - self.window_size + 1, self.stride))
-        last_end = starts[-1] + self.window_size if starts else 0
-        if self.include_partial and last_end < len(df):
-            starts.append(last_end)
-
-        reports = [
-            self._run_window(
-                df.iloc[start : min(start + self.window_size, len(df))],
-                start,
-                min(start + self.window_size, len(df)),
-                idx,
+        reports: list[Report] = []
+        if len(df) >= self.window_size:
+            starts = list(range(0, len(df) - self.window_size + 1, self.stride))
+            reports.extend(
+                self._run_window(
+                    df.iloc[start : start + self.window_size],
+                    start,
+                    start + self.window_size,
+                    index,
+                    self.window_size,
+                )
+                for index, start in enumerate(starts)
             )
-            for idx, start in enumerate(starts)
-        ]
-        covered = _covered_rows(starts, self.window_size, len(df))
-        damage_values = [r.damage_estimate for r in reports if r.damage_estimate is not None]
-        damage_errors = [r.damage_error for r in reports if r.damage_error]
-        return Report(
-            results=reports[-1].results,
-            alerts=[a for report in reports for a in report.alerts],
-            n_rows=len(df),
-            n_rows_analyzed=covered,
-            n_rows_skipped=len(df) - covered,
-            damage_estimate=float(np.mean(damage_values)) if damage_values else None,
-            damage_error="; ".join(dict.fromkeys(damage_errors)) or None,
-            corruptions=[c for report in reports for c in report.corruptions],
-            n_windows=len(reports),
-            window_summaries=[summary for report in reports for summary in report.window_summaries],
-        )
+            last_end = starts[-1] + self.window_size
+            tail_start = max(last_end, starts[-1] + self.stride)
+        else:
+            tail_start = 0
+
+        if self.include_partial and tail_start < len(df):
+            reports.append(
+                self._run_window(
+                    df.iloc[tail_start:],
+                    tail_start,
+                    len(df),
+                    len(reports),
+                    len(df) - tail_start,
+                )
+            )
+
+        return self._combine(reports, len(df))
+
+    def _trim_stream(self) -> None:
+        drop = self._stream_next_start - self._stream_buffer_start
+        if drop <= 0 or self._stream_buffer.empty:
+            return
+        drop = min(drop, len(self._stream_buffer))
+        self._stream_buffer = self._stream_buffer.iloc[drop:]
+        self._stream_buffer_start += drop
+
+    def _append_stream(self, frame: pd.DataFrame) -> None:
+        if frame.empty:
+            return
+        self._stream_buffer = pd.concat([self._stream_buffer, frame], ignore_index=True)
+        self._stream_total += len(frame)
+
+    def _emit_stream_windows(self) -> list[Report]:
+        reports: list[Report] = []
+        while True:
+            self._trim_stream()
+            if len(self._stream_buffer) < self.window_size:
+                return reports
+            start = self._stream_buffer_start
+            chunk = self._stream_buffer.iloc[: self.window_size]
+            reports.append(
+                self._run_window(
+                    chunk,
+                    start,
+                    start + self.window_size,
+                    self._stream_window,
+                    self.window_size,
+                )
+            )
+            self._stream_window += 1
+            self._stream_next_start = start + self.stride
+            self._stream_last_end = start + self.window_size
+            self._trim_stream()
 
     def update(self, batch, final: bool = False) -> list[Report]:
         """Feed a stream one batch at a time and return completed windows."""
         frame = read_frame(batch)
-        if self._stream_buffer is None:
-            self._stream_buffer = frame.copy()
-        else:
-            self._stream_buffer = pd.concat([self._stream_buffer, frame], ignore_index=True)
+        if self._stream_finalized:
+            if final and frame.empty:
+                return []
+            raise RuntimeError("stream already finalized")
 
-        reports: list[Report] = []
-        while len(self._stream_buffer) >= self.window_size:
-            chunk = self._stream_buffer.iloc[: self.window_size]
-            reports.append(self._run_window(chunk, 0, self.window_size, self._stream_window))
-            self._stream_window += 1
-            self._stream_buffer = self._stream_buffer.iloc[self.stride :]
+        if not self.sliding:
+            self._append_stream(frame)
+            if not final:
+                return []
+            self._stream_finalized = True
+            if self._stream_buffer.empty:
+                return []
+            report = self._run_window(
+                self._stream_buffer,
+                self._stream_buffer_start,
+                self._stream_total,
+                0,
+                len(self.reference),
+            )
+            self._stream_buffer = pd.DataFrame()
+            return [report]
 
-        if final and self._stream_buffer is not None and not self._stream_buffer.empty:
-            chunk = self._stream_buffer
-            reports.append(self._run_window(chunk, 0, len(chunk), self._stream_window))
-            self._stream_window += 1
-            self._stream_buffer = None
+        self._append_stream(frame)
+        reports = self._emit_stream_windows()
+
+        if final:
+            self._stream_finalized = True
+            partial_start = max(self._stream_last_end, self._stream_next_start)
+            drop = partial_start - self._stream_buffer_start
+            if drop > 0 and not self._stream_buffer.empty:
+                drop = min(drop, len(self._stream_buffer))
+                self._stream_buffer = self._stream_buffer.iloc[drop:]
+                self._stream_buffer_start += drop
+            if self.include_partial and not self._stream_buffer.empty:
+                start = self._stream_buffer_start
+                reports.append(
+                    self._run_window(
+                        self._stream_buffer,
+                        start,
+                        start + len(self._stream_buffer),
+                        self._stream_window,
+                        len(self._stream_buffer),
+                    )
+                )
+                self._stream_window += 1
+            self._stream_buffer = pd.DataFrame()
 
         return reports
 
