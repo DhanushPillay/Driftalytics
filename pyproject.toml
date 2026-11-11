@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "driftalytics"
-version = "0.2.0"
+version = "0.3.0"
 description = "Lightweight ML/LLM drift monitoring with early-warning damage prediction."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
@@ -30,7 +31,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.5", "mypy>=1.10", "pre-commit>=3.7"]
+parquet = ["pyarrow>=14"]
+dev = [
+    "pyarrow>=14",
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+]
 
 [project.scripts]
 driftalytics = "driftalytics.cli:main"
@@ -41,6 +50,7 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+extend-exclude = [".venv", "data"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
