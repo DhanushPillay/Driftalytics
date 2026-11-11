@@ -14,9 +14,9 @@ incremental windows over a stream. Batch mode is the simple case; `sliding=True`
 
 ## Per-monitor thresholds
 
-v0.2 makes the monitor's own threshold authoritative. A global `alert_threshold` remains
-as a fallback for custom monitors that do not define one. The earlier behavior let a
-global value override tuned thresholds, which made monitor configuration misleading.
+A monitor's own threshold is authoritative. A global `alert_threshold` remains as a
+fallback for custom monitors that do not define one. Letting a global value override tuned
+thresholds would make monitor configuration misleading.
 
 ## Statistical tests need effect sizes
 
@@ -46,9 +46,9 @@ injection mistakes.
 
 ## LLM judge limits
 
-Judging every request is expensive. The judge caches exact triples, samples traffic, and
+Judging every request is expensive. The judge caches exact requests, samples traffic, and
 enforces a token budget. An earlier batching option was removed because it was not
-implemented; v0.2 does not claim batching. Provider failures are returned as per-item
+implemented; the library does not claim batching. Provider failures are returned as per-item
 statuses instead of raising.
 
 ## Dependencies
@@ -71,3 +71,33 @@ The 0.2 release fixes correctness and packaging issues found in review, adds str
 updates, status reporting, expected-cardinality handling, BH correction, and a real-data
 detection benchmark. It does not add hosted infrastructure, database logging, or a
 dashboard.
+
+## Version 0.3 review
+
+The 0.3 release fixes defects that survived 0.2:
+
+- **Absolute window offsets.** Reports and alerts now carry `start` and `end`, so streaming
+  windows can be traced back to their input rows. Partial tails no longer reuse window-zero
+  coordinates.
+- **Explicit partial-window policy.** A non-sliding run scores the whole input as one window.
+  Sliding tails start at the later of the last full window's end and the next scheduled
+  stride, which prevents overlap when `stride < window_size` and respects gaps when
+  `stride > window_size`.
+- **Partial windows use their actual size.** Expected-size checks no longer compare a short
+  tail against a full window and raise false volume or cardinality alerts.
+- **Idempotent stream finalization.** `final=True` emits at most one allowed partial window;
+  repeated finalization returns no reports, and new data after finalization is rejected.
+- **Separated damage metrics.** Training, validation, and test metrics are stored separately.
+  The saved `metrics` field remains the training metric for compatibility, but it is no
+  longer presented as generalization.
+- **Family-aware benchmark holdout.** Related corruption families stay in one split. This
+  removed leakage from the previous random 70/30 split and produced a negative transfer
+  result: the linear predictor does not beat the heuristic on held-out families.
+- **LLM prompt and budget hardening.** Untrusted fields are JSON-encoded, the system
+  instruction is separate, the prompt version is part of the cache key, output length is
+  capped, failed calls consume budget, and retries use jitter and `Retry-After`.
+- **Report and CLI validation.** Non-finite values become `null`/`n/a`, JSON rejects NaN,
+  boolean config values are parsed explicitly, and invalid monitors or output paths fail
+  early.
+- **Optional Parquet and CI.** `pyarrow` is an optional extra, and CI runs lint, format,
+  types, and tests on Python 3.10 through 3.13.
