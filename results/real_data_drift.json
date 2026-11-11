@@ -1,8 +1,8 @@
 {
   "rows": 50000,
   "window_size": 5000,
-  "seconds": 0.4994,
-  "rows_per_sec": 100118.4,
+  "seconds": 0.6183,
+  "rows_per_sec": 80865.6,
   "windows": 10,
   "alerts": 39,
   "results": [
