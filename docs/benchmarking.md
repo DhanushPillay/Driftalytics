@@ -6,6 +6,8 @@ All benchmark scripts live in `benchmarks/`. Install the project from source fir
 pip install -e ".[dev]"
 ```
 
+The dev extra includes `pyarrow`, which the real-data scripts need to read Parquet.
+
 ## Scripts
 
 - `benchmarks/run_all.py`: synthetic throughput at 1k, 10k, and 100k rows.
@@ -24,9 +26,9 @@ Configuration: 5,000-row reference, 2 numeric columns, monitors `psi`, `ks`, and
 
 | Rows | Seconds | Rows/sec | Alerts |
 |---|---|---|---|
-| 1,000 | 0.0041 | 244,642 | 0 |
-| 10,000 | 0.0155 | 646,768 | 0 |
-| 100,000 | 0.0161 | 6,202,512 | 0 |
+| 1,000 | 0.0043 | 233,590 | 0 |
+| 10,000 | 0.0167 | 600,010 | 0 |
+| 100,000 | 0.0144 | 6,961,994 | 0 |
 
 These numbers vary between runs. Fixed pandas overhead dominates at small sizes, and
 larger runs benefit from warm caches and vectorized operations. The 100k result is not
@@ -52,7 +54,7 @@ The script splits the loaded rows into reference and live halves, applies scale 
 missingness corruption to the live half, and runs 5 monitors over 10 windows of 5,000
 rows.
 
-Result: 50,000 rows, 10 windows, 39 alerts, 0.4994 seconds, 100,118.4 rows/sec. The final
+Result: 50,000 rows, 10 windows, 39 alerts, 0.6183 seconds, 80,865.6 rows/sec. The final
 window's monitor scores were:
 
 | Monitor | Score | Threshold | Alert |
@@ -95,21 +97,36 @@ general detection claim.
 
 The script builds 26 corruption scenarios across distance scaling, distance noise,
 passenger-count missingness, pickup-location shifts, payment-type shifts, and combined
-cases. It fits the damage predictor on 18 scenarios and evaluates on 8:
+cases. Splits are family-aware, so related corruptions stay together:
 
-| Metric | Value |
-|---|---|
-| MAE | 0.2536 |
-| RMSE | 0.3140 |
-| R² | 0.4299 |
+| Split | Families | Scenarios |
+|---|---|---|
+| Train | distance scale, distance noise | 11 |
+| Validation | passenger missingness | 5 |
+| Test | pickup location, payment type, combined | 10 |
+
+| Split | Model MAE | Model RMSE | Model R² | Heuristic MAE |
+|---|---|---|---|---|
+| Train | 0.1892 | 0.2409 | 0.6653 | — |
+| Validation | 0.2643 | 0.2643 | n/a* | 0.0687 |
+| Test | 0.3446 | 0.4262 | -0.0950 | 0.3087 |
+
+\* The validation target standard deviation is 0.0007. Passenger missingness barely changes
+fare RMSE, so R-squared is numerically unstable and not meaningful.
 
 The target is the relative RMSE increase over the clean model, clipped to `[0, 1]`. The
-predictor is linear and trained on simulated corruptions. Eight test scenarios is a small
-sample; the R² is indicative, not a guarantee.
+fitted linear model does not beat the untrained fixed-weight heuristic on either held-out
+family. On test it is close but worse, and its negative R-squared means it does not explain
+held-out variance. Report this as a negative transfer result. The previous random scenario
+split leaked related corruptions across train and test; those numbers should not be used.
+The predictor is linear and trained on simulated corruptions, and a production deployment
+needs labeled damage from its own domain.
 
 ## Reporting rules
 
 - Report detection rate and false-positive rate together.
+- Keep related corruption families in one split; do not randomly split scenarios that share
+  a mechanism.
 - Report throughput at several sizes and name the monitor set.
 - Report hardware and Python version.
 - Do not publish LLM judge-versus-human agreement unless a labeled subset exists. This
