@@ -9,7 +9,7 @@ while its inputs move away from the data it was trained on. Dashboards stay gree
 succeed, and quality drops silently. Driftalytics turns that displacement into a small,
 inspectable vector and uses it as an early-warning signal.
 
-> Status: v0.2.0, early development. APIs may change before 1.0.
+> Status: v0.3.0, early development. APIs may change before 1.0.
 
 ## What it does
 
@@ -77,10 +77,15 @@ sequenceDiagram
     Runner->>Out: results, alerts, window summaries
 ```
 
-`run()` scores one batch or a sequence of windows. `update()` accepts data incrementally
-and returns a report when a window fills. `run_stream()` turns an iterable of batches into
-an iterator of window reports. Overlapping windows are counted once when the report
-computes analyzed and skipped rows.
+`run()` scores one batch or a sequence of windows. A non-sliding run treats the entire
+input as one window. A sliding run emits full windows at each stride and, when
+`include_partial=True`, one trailing partial window. Reports and alerts carry absolute
+`start` and `end` offsets into the input. `update()` accepts data incrementally and returns
+a report when a window fills. `final=True` flushes an allowed partial window once; later
+finalization calls return no reports. `run_stream()` turns an iterable of batches into an
+iterator of window reports. Overlapping windows are counted once when the report computes
+analyzed rows, and rows skipped by a stride larger than the window size are counted as
+skipped.
 
 ## The corruption vector
 
@@ -135,25 +140,26 @@ columns:
 
 | Rows | Seconds | Rows/sec | Alerts |
 |---|---|---|---|
-| 1,000 | 0.0041 | 244,642 | 0 |
-| 10,000 | 0.0155 | 646,768 | 0 |
-| 100,000 | 0.0161 | 6,202,512 | 0 |
+| 1,000 | 0.0043 | 233,590 | 0 |
+| 10,000 | 0.0167 | 600,010 | 0 |
+| 100,000 | 0.0144 | 6,961,994 | 0 |
 
 Fixed pandas overhead dominates small batches. The 100,000-row figure is measured, not
 extrapolated to larger inputs.
 
 ### Real-data drift detection
 
-The real dataset is NYC TLC yellow taxi trips for January 2024. The benchmark splits
-50,000 rows into reference and live halves, applies scale and missingness corruption to
-the live half, and evaluates 10 windows of 5,000 rows with five monitors.
+The real dataset is NYC TLC yellow taxi trips for January 2024. The benchmark loads
+100,000 rows and splits them into 50,000 reference and 50,000 live rows, applies scale and
+missingness corruption to the live half, and evaluates 10 windows of 5,000 rows with five
+monitors.
 
 | Metric | Value |
 |---|---|
 | Rows analyzed | 50,000 |
 | Windows | 10 |
-| Runtime | 0.4994 seconds |
-| Throughput | 100,118 rows/sec |
+| Runtime | 0.6183 seconds |
+| Throughput | 80,866 rows/sec |
 | Alerts across windows | 39 |
 
 Final-window scores:
@@ -183,8 +189,9 @@ flowchart LR
     D --> G[26 corruption scenarios]
     G --> H[Windowed detection]
     G --> I[Measured performance loss]
-    I --> J[18 train / 8 test]
-    J --> K[Damage predictor metrics]
+    I --> J[Family holdout split]
+    J --> K[11 train / 5 validation / 10 test]
+    K --> L[Damage predictor metrics]
 ```
 
 The clean linear fare model uses `trip_distance`, `trip_distance` squared,
@@ -211,17 +218,26 @@ The corrupted scenario scales trip distance by 1.6 and makes 15% of passenger co
 missing. Cardinality and drift magnitude did not cross their thresholds for this
 corruption. Read the detection rate as a scenario result, not a general claim.
 
-The damage predictor is fitted on 18 of 26 simulated corruption scenarios and evaluated
-on the remaining 8:
+The damage predictor uses a family-aware holdout so related corruptions cannot leak across
+splits. Distance-scaling and distance-noise scenarios train the model, passenger-missingness
+scenarios validate it, and location, payment, and combined scenarios test it:
 
-| Metric | Value |
-|---|---|
-| MAE | 0.2536 |
-| RMSE | 0.3140 |
-| R-squared | 0.4299 |
+| Split | Scenarios | Model MAE | Model RMSE | Model R² | Heuristic MAE |
+|---|---|---|---|---|---|
+| Train (distance) | 11 | 0.1892 | 0.2409 | 0.6653 | — |
+| Validation (missingness) | 5 | 0.2643 | 0.2643 | n/a* | 0.0687 |
+| Test (location, payment, combined) | 10 | 0.3446 | 0.4262 | -0.0950 | 0.3087 |
 
-The target is the relative RMSE increase over the clean model, clipped to `[0, 1]`. Eight
-held-out scenarios is a small sample. The R-squared is indicative, not a guarantee.
+\* The validation target has a standard deviation of 0.0007: missing passenger counts barely
+change fare RMSE, so R-squared is numerically unstable and not meaningful there.
+
+The target is the relative RMSE increase over the clean model, clipped to `[0, 1]`. The
+fitted model does not beat the untrained heuristic on either held-out family. On the test
+split it is close but worse (MAE 0.3446 versus 0.3087), and the negative R-squared means it
+does not explain held-out variance. This is an honest negative result for cross-family
+transfer. The earlier random scenario split shared related corruptions between train and
+test and overstated accuracy. A production predictor needs labeled damage from the target
+domain, not just more synthetic distance examples.
 
 ## Design choices
 
@@ -232,8 +248,12 @@ held-out scenarios is a small sample. The R-squared is indicative, not a guarant
 - **Statistical tests need effect sizes.** KS and chi-square require both significance and
   a minimum effect before alerting.
 - **No hidden runtime stack.** Core dependencies are numpy, pandas, scipy, and pyyaml.
-  Reports use escaped string formatting. Damage models use JSON.
-- **LLM cost is bounded.** Judging is cached, sampled, retried, and capped by tokens.
+  Parquet input is optional through `pyarrow`. Reports use escaped string formatting.
+  Damage models use JSON.
+- **Window boundaries are explicit.** Reports and alerts carry absolute offsets, and
+  partial windows use their real row count for volume and cardinality checks.
+- **LLM cost is bounded.** Judging is cached, sampled, retried, and capped by tokens. Failed
+  calls consume budget so invalid responses cannot bypass the cap.
 
 ## Project layout
 
@@ -266,8 +286,9 @@ tests/                unit and regression tests
 
 ## Limitations
 
-- The damage predictor is trained on simulated corruptions in the published benchmark.
-  Real deployments need their own labeled damage data.
+- The damage predictor is trained on simulated corruptions in the published benchmark, and
+  its linear form does not generalize across corruption families. Real deployments need
+  their own labeled damage data.
 - Detection quality depends on window size, monitor thresholds, and the kind of drift.
 - The library has no built-in database, scheduler, or hosted dashboard. It produces
   reports and leaves storage and delivery to the caller.
