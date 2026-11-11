@@ -13,6 +13,22 @@ from .core import CorruptionVector
 FORMAT = "driftalytics-damage-v1"
 
 
+def _finite_float(value: Any, label: str) -> float:
+    result = float(value)
+    if not np.isfinite(result):
+        raise ValueError(f"{label} must be finite")
+    return result
+
+
+def _read_metrics(payload: dict[str, Any], key: str) -> dict[str, float]:
+    value = payload.get(key, {})
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{key} must be a mapping")
+    return {str(name): _finite_float(metric, f"{key}.{name}") for name, metric in value.items()}
+
+
 class DamagePredictor:
     """Linear damage predictor trained on (corruption vector, performance drop) pairs."""
 
@@ -20,6 +36,9 @@ class DamagePredictor:
         self.coef_: list[float] | None = None
         self.intercept_: float = 0.0
         self.metrics_: dict[str, float] = {}
+        self.training_metrics_: dict[str, float] = {}
+        self.validation_metrics_: dict[str, float] = {}
+        self.test_metrics_: dict[str, float] = {}
         self.feature_names: tuple[str, ...] = CorruptionVector.feature_names
 
     @property
@@ -44,12 +63,23 @@ class DamagePredictor:
         solution, *_ = np.linalg.lstsq(design, target, rcond=None)
         self.coef_ = solution[:-1].tolist()
         self.intercept_ = float(solution[-1])
-        self.metrics_ = self.evaluate(values, target)
+        self.training_metrics_ = self.evaluate(values, target)
+        self.metrics_ = self.training_metrics_
         return self
 
     def evaluate(self, X, y) -> dict[str, float]:
         values = np.asarray(X, dtype=float)
         target = np.asarray(y, dtype=float)
+        if values.ndim != 2:
+            raise ValueError("X must be a 2D array")
+        if target.ndim != 1:
+            raise ValueError("y must be a 1D array")
+        if len(values) != len(target):
+            raise ValueError("X and y must have the same number of rows")
+        if len(values) == 0:
+            raise ValueError("evaluation data must not be empty")
+        if not np.isfinite(values).all() or not np.isfinite(target).all():
+            raise ValueError("evaluation data must be finite")
         predictions = np.array([self.predict(row) for row in values])
         residual = predictions - target
         mae = float(np.mean(np.abs(residual)))
@@ -87,12 +117,17 @@ class DamagePredictor:
             "coef": self.coef_,
             "intercept": self.intercept_,
             "metrics": self.metrics_,
+            "training_metrics": self.training_metrics_,
+            "validation_metrics": self.validation_metrics_,
+            "test_metrics": self.test_metrics_,
         }
         output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     @classmethod
     def load(cls, path: str) -> DamagePredictor:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("damage predictor payload must be a mapping")
         if data.get("format") != FORMAT:
             raise ValueError(f"unsupported damage predictor format: {data.get('format')!r}")
         feature_names = tuple(data.get("feature_names", ()))
@@ -102,10 +137,17 @@ class DamagePredictor:
         model = cls()
         coef = data.get("coef")
         if coef is not None:
-            coef = [float(value) for value in coef]
+            if not isinstance(coef, list):
+                raise ValueError("damage predictor coefficients must be a list")
+            coef = [_finite_float(value, "coefficient") for value in coef]
             if len(coef) != len(feature_names):
                 raise ValueError("damage predictor coefficient count is invalid")
         model.coef_ = coef
-        model.intercept_ = float(data.get("intercept", 0.0))
-        model.metrics_ = {str(key): float(value) for key, value in data.get("metrics", {}).items()}
+        model.intercept_ = _finite_float(data.get("intercept", 0.0), "intercept")
+        model.training_metrics_ = _read_metrics(data, "training_metrics") or _read_metrics(
+            data, "metrics"
+        )
+        model.validation_metrics_ = _read_metrics(data, "validation_metrics")
+        model.test_metrics_ = _read_metrics(data, "test_metrics")
+        model.metrics_ = model.training_metrics_
         return model
