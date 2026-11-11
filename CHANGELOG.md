@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.4.0
+
+### Changed
+
+- All tabular benchmarks now use the real Insects `incremental_abrupt_balanced` stream
+  instead of synthetic normal rows or NYC TLC rows with injected corruption.
+- Damage labels are observed chronological classification-error increases from a logistic
+  regression trained on the first 20,000 rows.
+- The damage predictor uses a chronological 60/20/20 split instead of a random split.
+- Benchmark reporting includes label-aware detection precision and recall plus a
+  drift-only ablation.
+
+### Added
+
+- `src/driftalytics/datasets.py`, which downloads, SHA-256 verifies, caches, and validates
+  the Insects CSV.
+- Optional `bench` extra with `pyarrow` and `scikit-learn`. Core runtime dependencies are
+  unchanged.
+- `results/insects_damage_windows.csv` with the per-window corruption features and damage
+  labels.
+
+### Removed
+
+- Synthetic throughput data and synthetic damage training (`make_synthetic`, `--n`, and
+  `--seed`).
+- The NYC TLC controlled-corruption benchmark and `results/real_damage_scenarios.csv`.
+
+### Verification
+
+- `pytest`: 43 passed.
+- `ruff check src tests benchmarks`: passed.
+- `ruff format --check src tests benchmarks`: passed.
+- `mypy src`: passed, 14 source files.
+- CLI version: 0.4.0.
+- Throughput (33 features, 3 monitors): 9,495.7 / 6,087.9 / 3,544.3 rows/sec at 1k / 10k /
+  100k rows.
+- Natural drift (59,986 live rows, 5 monitors): 119 windows, 231 alerts, 2,806.2 rows/sec.
+- Damage predictor: test MAE 0.0405 and R-squared 0.9525, against 0.1843 and 0.4198 for the
+  untrained heuristic. The drift-only ablation reaches test MAE 0.0385.
+
 ## 0.3.0
 
 ### Fixed
