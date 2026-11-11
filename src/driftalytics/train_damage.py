@@ -42,7 +42,8 @@ def load_training_data(path: str):
     missing = [column for column in required if column not in frame.columns]
     if missing:
         raise ValueError(f"training data is missing columns: {', '.join(missing)}")
-    frame = frame[required].dropna()
+    if frame[required].isna().any().any():
+        raise ValueError("training data contains missing values")
     features = frame[list(CorruptionVector.feature_names)].to_numpy(dtype=float)
     return features, frame["damage"].to_numpy(dtype=float)
 
@@ -55,25 +56,39 @@ def train_and_save(
     test_size: float = 0.2,
 ) -> DamagePredictor:
     features, target = load_training_data(data_path) if data_path else make_synthetic(n, seed)
-    if len(features) < 2:
-        raise ValueError("need at least two training rows")
+    if not 0.0 < test_size < 0.5:
+        raise ValueError("test_size must be between 0 and 0.5")
+    if len(features) < 3:
+        raise ValueError("need at least three training rows")
 
     rng = np.random.default_rng(seed)
     order = rng.permutation(len(features))
-    split = int((1.0 - test_size) * len(features))
-    split = max(1, min(split, len(features) - 1))
-    train_idx, test_idx = order[:split], order[split:]
+    n_test = max(1, int(test_size * len(features)))
+    n_validation = max(1, int(test_size * len(features)))
+    n_train = len(features) - n_test - n_validation
+    if n_train < 1:
+        raise ValueError("test_size leaves no training rows")
+    train_idx = order[:n_train]
+    validation_idx = order[n_train : n_train + n_validation]
+    test_idx = order[n_train + n_validation :]
 
     model = DamagePredictor()
     model.fit(features[train_idx], target[train_idx])
-    metrics = model.evaluate(features[test_idx], target[test_idx])
-    print(
-        f"trained damage predictor: rows={len(features)} train={len(train_idx)} "
-        f"test={len(test_idx)} MAE={metrics['mae']:.4f} "
-        f"RMSE={metrics['rmse']:.4f} R2={metrics['r2']:.4f}"
-    )
+    model.validation_metrics_ = model.evaluate(features[validation_idx], target[validation_idx])
+    model.test_metrics_ = model.evaluate(features[test_idx], target[test_idx])
+    for label, metrics in (
+        ("validation", model.validation_metrics_),
+        ("test", model.test_metrics_),
+    ):
+        print(
+            f"{label}: rows={len(features)} MAE={metrics['mae']:.4f} "
+            f"RMSE={metrics['rmse']:.4f} R2={metrics['r2']:.4f}"
+        )
     model.save(out_path)
-    print(f"saved to {out_path}")
+    print(
+        f"saved to {out_path} (train={len(train_idx)}, "
+        f"validation={len(validation_idx)}, test={len(test_idx)})"
+    )
     return model
 
 
