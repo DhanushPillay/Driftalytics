@@ -43,6 +43,21 @@ def _score(values: list[float]) -> float:
     return float(max(values)) if values else 0.0
 
 
+def _threshold(value: float | None) -> float:
+    if value is None:
+        raise ValueError("threshold must be configured")
+    value = float(value)
+    if not np.isfinite(value) or value < 0:
+        raise ValueError("threshold must be a finite non-negative number")
+    return value
+
+
+def _expected_size(value: int | None) -> int | None:
+    if value is not None and value < 0:
+        raise ValueError("expected_size must be non-negative")
+    return value
+
+
 def _details(values: dict[str, float], **extra) -> dict:
     return {
         "per_column": values,
@@ -90,11 +105,13 @@ class PSIMonitor(Monitor):
     name = "psi"
 
     def __init__(self, threshold: float = 0.2, n_bins: int = 10):
-        self.threshold = threshold
+        self.threshold = _threshold(threshold)
+        if n_bins <= 0:
+            raise ValueError("n_bins must be greater than 0")
         self.n_bins = n_bins
 
     def on_batch(self, reference, batch) -> MonitorResult:
-        assert self.threshold is not None
+        threshold = _threshold(self.threshold)
         columns = _numeric_columns(reference, batch)
         values = {c: _psi_col(reference[c], batch[c], self.n_bins) for c in columns}
         if not values:
@@ -102,7 +119,7 @@ class PSIMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={"reason": "no common numeric columns"},
             )
@@ -110,8 +127,8 @@ class PSIMonitor(Monitor):
         return MonitorResult(
             name=self.name,
             score=score,
-            alert=score > self.threshold,
-            threshold=self.threshold,
+            alert=score > threshold,
+            threshold=threshold,
             details=_details(values),
         )
 
@@ -120,12 +137,12 @@ class KSMonitor(Monitor):
     name = "ks"
 
     def __init__(self, alpha: float = 0.05, min_effect: float = 0.1):
-        self.threshold = alpha
-        self.alpha = alpha
-        self.min_effect = min_effect
+        self.alpha = _threshold(alpha)
+        self.threshold = self.alpha
+        self.min_effect = _threshold(min_effect)
 
     def on_batch(self, reference, batch) -> MonitorResult:
-        assert self.threshold is not None
+        threshold = _threshold(self.threshold)
         statistics: dict[str, float] = {}
         p_values: dict[str, float] = {}
         for column in _numeric_columns(reference, batch):
@@ -142,7 +159,7 @@ class KSMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={"reason": "no common numeric columns"},
             )
@@ -158,7 +175,7 @@ class KSMonitor(Monitor):
             name=self.name,
             score=score,
             alert=any(effective.values()),
-            threshold=self.threshold,
+            threshold=threshold,
             details={
                 "statistics": statistics,
                 "p_values": p_values,
@@ -172,10 +189,10 @@ class WassersteinMonitor(Monitor):
     name = "wasserstein"
 
     def __init__(self, threshold: float = 0.1):
-        self.threshold = threshold
+        self.threshold = _threshold(threshold)
 
     def on_batch(self, reference, batch) -> MonitorResult:
-        assert self.threshold is not None
+        threshold = _threshold(self.threshold)
         values: dict[str, float] = {}
         for column in _numeric_columns(reference, batch):
             ref_values = _float_values(reference[column])
@@ -191,7 +208,7 @@ class WassersteinMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={"reason": "no common numeric columns"},
             )
@@ -199,8 +216,8 @@ class WassersteinMonitor(Monitor):
         return MonitorResult(
             name=self.name,
             score=score,
-            alert=score > self.threshold,
-            threshold=self.threshold,
+            alert=score > threshold,
+            threshold=threshold,
             details=_details(values),
         )
 
@@ -209,10 +226,10 @@ class MissingRateMonitor(Monitor):
     name = "missing_rate"
 
     def __init__(self, threshold: float = 0.05):
-        self.threshold = threshold
+        self.threshold = _threshold(threshold)
 
     def on_batch(self, reference, batch) -> MonitorResult:
-        assert self.threshold is not None
+        threshold = _threshold(self.threshold)
         columns = _common_columns(reference, batch)
         values = {
             c: abs(float(batch[c].isna().mean()) - float(reference[c].isna().mean()))
@@ -223,7 +240,7 @@ class MissingRateMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={"reason": "no common columns"},
             )
@@ -231,8 +248,8 @@ class MissingRateMonitor(Monitor):
         return MonitorResult(
             name=self.name,
             score=score,
-            alert=score > self.threshold,
-            threshold=self.threshold,
+            alert=score > threshold,
+            threshold=threshold,
             details=_details(values),
         )
 
@@ -241,12 +258,12 @@ class CardinalityMonitor(Monitor):
     name = "cardinality"
 
     def __init__(self, threshold: float = 0.1, expected_size: int | None = None):
-        self.threshold = threshold
-        self.expected_size = expected_size
+        self.threshold = _threshold(threshold)
+        self.expected_size = _expected_size(expected_size)
 
     def on_batch(self, reference, batch) -> MonitorResult:
-        assert self.threshold is not None
-        sample_size = self.expected_size or len(batch)
+        threshold = _threshold(self.threshold)
+        sample_size = self.expected_size if self.expected_size is not None else len(batch)
         values: dict[str, float] = {}
         for column in _common_columns(reference, batch):
             ref_card = max(expected_cardinality(reference[column], sample_size), 1.0)
@@ -256,7 +273,7 @@ class CardinalityMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={"reason": "no common columns"},
             )
@@ -264,8 +281,8 @@ class CardinalityMonitor(Monitor):
         return MonitorResult(
             name=self.name,
             score=score,
-            alert=score > self.threshold,
-            threshold=self.threshold,
+            alert=score > threshold,
+            threshold=threshold,
             details=_details(values),
         )
 
@@ -274,13 +291,15 @@ class ChiSquareMonitor(Monitor):
     name = "chi_square"
 
     def __init__(self, alpha: float = 0.05, min_effect: float = 0.1, max_categories: int = 50):
-        self.threshold = alpha
-        self.alpha = alpha
-        self.min_effect = min_effect
+        self.alpha = _threshold(alpha)
+        self.threshold = self.alpha
+        self.min_effect = _threshold(min_effect)
+        if max_categories <= 0:
+            raise ValueError("max_categories must be greater than 0")
         self.max_categories = max_categories
 
     def on_batch(self, reference, batch) -> MonitorResult:
-        assert self.threshold is not None
+        threshold = _threshold(self.threshold)
         statistics: dict[str, float] = {}
         p_values: dict[str, float] = {}
         skipped: dict[str, str] = {}
@@ -311,7 +330,7 @@ class ChiSquareMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={"reason": "no eligible categorical columns", "skipped": skipped},
             )
@@ -327,7 +346,7 @@ class ChiSquareMonitor(Monitor):
             name=self.name,
             score=score,
             alert=any(effective.values()),
-            threshold=self.threshold,
+            threshold=threshold,
             details={
                 "statistics": statistics,
                 "p_values": p_values,
@@ -342,18 +361,18 @@ class VolumeMonitor(Monitor):
     name = "volume"
 
     def __init__(self, threshold: float = 0.2, expected_size: int | None = None):
-        self.threshold = threshold
-        self.expected_size = expected_size
+        self.threshold = _threshold(threshold)
+        self.expected_size = _expected_size(expected_size)
 
     def on_batch(self, reference, batch) -> MonitorResult:
-        assert self.threshold is not None
-        expected = self.expected_size or len(reference)
+        threshold = _threshold(self.threshold)
+        expected = self.expected_size if self.expected_size is not None else len(reference)
         score = abs(len(batch) - expected) / max(expected, 1)
         return MonitorResult(
             name=self.name,
             score=float(score),
-            alert=score > self.threshold,
-            threshold=self.threshold,
+            alert=score > threshold,
+            threshold=threshold,
             details={"expected_size": expected, "batch_size": len(batch)},
         )
 
@@ -362,10 +381,10 @@ class SchemaChangeMonitor(Monitor):
     name = "schema_change"
 
     def __init__(self, threshold: float = 0.0):
-        self.threshold = threshold
+        self.threshold = _threshold(threshold)
 
     def on_batch(self, reference, batch) -> MonitorResult:
-        assert self.threshold is not None
+        threshold = _threshold(self.threshold)
         columns = set(reference.columns) | set(batch.columns)
         changes: dict[str, str] = {}
         for column in reference.columns:
@@ -380,8 +399,8 @@ class SchemaChangeMonitor(Monitor):
         return MonitorResult(
             name=self.name,
             score=float(score),
-            alert=score > self.threshold,
-            threshold=self.threshold,
+            alert=score > threshold,
+            threshold=threshold,
             details={"changes": changes},
         )
 
@@ -390,17 +409,17 @@ class DriftMagnitudeMonitor(Monitor):
     name = "drift_magnitude"
 
     def __init__(self, threshold: float = 0.5, expected_size: int | None = None):
-        self.threshold = threshold
-        self.expected_size = expected_size
+        self.threshold = _threshold(threshold)
+        self.expected_size = _expected_size(expected_size)
 
     def result_from_corruption(self, corruption: CorruptionVector) -> MonitorResult:
-        assert self.threshold is not None
+        threshold = _threshold(self.threshold)
         score = corruption.drift_magnitude
         return MonitorResult(
             name=self.name,
             score=float(score),
-            alert=score > self.threshold,
-            threshold=self.threshold,
+            alert=score > threshold,
+            threshold=threshold,
             details={"corruption": corruption.as_dict()},
         )
 
