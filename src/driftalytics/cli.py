@@ -14,6 +14,18 @@ from .runner import SlidingWindowRunner
 from .version import __version__
 
 
+def _as_bool(value, key: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes", "1"}:
+            return True
+        if lowered in {"false", "no", "0"}:
+            return False
+    raise ValueError(f"{key} must be a boolean")
+
+
 def run_config(config_path: str) -> int:
     path = Path(config_path)
     if not path.exists():
@@ -25,19 +37,31 @@ def run_config(config_path: str) -> int:
     if "reference" not in config:
         raise ValueError("config requires a reference path")
 
+    monitors = config.get("monitors", ["psi"])
+    if (
+        not isinstance(monitors, (list, tuple))
+        or not monitors
+        or not all(isinstance(item, str) for item in monitors)
+    ):
+        raise ValueError("monitors must be a non-empty list of monitor names")
+
+    alert_threshold = config.get("alert_threshold")
+    if alert_threshold is not None:
+        alert_threshold = float(alert_threshold)
+
     predictor = None
     if config.get("damage_predictor"):
-        predictor = DamagePredictor.load(config["damage_predictor"])
+        predictor = DamagePredictor.load(str(config["damage_predictor"]))
 
     runner = SlidingWindowRunner(
         reference=config["reference"],
-        monitors=config.get("monitors", ["psi"]),
+        monitors=list(monitors),
         window_size=int(config.get("window_size", 1000)),
-        alert_threshold=config.get("alert_threshold"),
+        alert_threshold=alert_threshold,
         damage_predictor=predictor,
-        stride=config.get("stride"),
-        sliding=bool(config.get("sliding", False)),
-        include_partial=bool(config.get("include_partial", True)),
+        stride=int(config["stride"]) if config.get("stride") is not None else None,
+        sliding=_as_bool(config.get("sliding", False), "sliding"),
+        include_partial=_as_bool(config.get("include_partial", True), "include_partial"),
     )
     report = runner.run(config.get("data", config["reference"]))
     print(report.summary())
@@ -46,8 +70,12 @@ def run_config(config_path: str) -> int:
     if not isinstance(output, dict):
         raise ValueError("output must be a mapping")
     if output.get("html"):
+        if not isinstance(output["html"], str):
+            raise ValueError("output.html must be a path string")
         report.to_html(output["html"])
     if output.get("json"):
+        if not isinstance(output["json"], str):
+            raise ValueError("output.json must be a path string")
         report.to_json(output["json"])
     return 0
 
