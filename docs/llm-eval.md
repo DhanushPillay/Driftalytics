@@ -1,7 +1,7 @@
 # LLM evaluation
 
 LLM judging is cost-bounded by design: identical requests are cached, traffic can be
-sampled, and every run has a token budget. There is no batching layer in v0.2.
+sampled, and every run has a token budget. There is no batching layer in v0.3.
 
 ## Setup
 
@@ -24,7 +24,8 @@ judge = LLMJudge(
     metrics=["faithfulness", "answer_relevance"],
     budget_tokens=50_000,       # hard cap for this judge instance
     sample_rate=0.1,            # judge about 10% of requests
-    cache=True,                 # reuse identical (question, context, answer) triples
+    cache=True,                 # reuse identical requests
+    max_output_tokens=256,      # cap the judge's reply
 )
 results = judge.evaluate(questions, contexts, answers)
 ```
@@ -47,12 +48,17 @@ No API key is required. The model must already be available to the local Ollama 
 ## Cost controls
 
 - `budget_tokens`: stops issuing requests once the estimated spend would exceed the cap.
-  Items skipped for budget have `_status="budget"`.
+  Items skipped for budget have `_status="budget"`. The judge reserves the estimated prompt
+  cost before a request, reconciles actual usage on success, and charges the reservation on
+  provider or parse failures. Invalid responses therefore cannot bypass the cap.
 - `sample_rate`: a value below 1.0 randomly skips items. Skipped items have
   `_status="sampled"`. This is uniform sampling, not stratified by segment.
-- `cache`: keyed by model and the exact question, context, and answer text. Hits have
-  `_status="cached"` and cost no tokens.
-- `timeout` and `retries`: retry 429 and 5xx responses with exponential backoff.
+- `cache`: keyed by provider, model, metric list, prompt version, and the exact question,
+  context, and answer. Hits have `_status="cached"` and cost no tokens.
+- `max_output_tokens`: forwarded to each provider as an output cap. Non-positive values are
+  rejected.
+- `timeout` and `retries`: retry 429 and 5xx responses with jittered exponential backoff and
+  honor `Retry-After` when present.
 - `seed`: controls the sampling RNG for reproducible runs.
 
 Token counts come from provider usage fields when available. Otherwise the judge uses a
@@ -65,9 +71,13 @@ statuses so one bad response does not stop a batch. The `faithfulness` and
 `answer_relevance` monitors count only usable scores. If none are usable, the monitor
 returns `status="skipped"` rather than an alert based on missing data.
 
-Prompt injection is limited by treating the question, context, and answer as data inside
-XML-like tags and asking for JSON only. This reduces risk but does not eliminate it; do
-not send untrusted content to a judge with tool access.
+Prompt injection is reduced by sending a separate system instruction, serializing the
+question, context, and answer as a JSON data block, and asking for JSON only. The payload is
+still untrusted text that reaches the provider, so this reduces risk but does not eliminate
+it. Do not send untrusted content to a judge with tool access.
+
+The cache key includes the prompt version (`PROMPT_VERSION`). Changing the prompt invalidates
+old cache entries instead of silently reusing scores from a different rubric.
 
 ## Reporting
 
