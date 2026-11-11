@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from ..core import Monitor, MonitorResult
 from ..llm import LLMJudge
 
 REQUIRED_COLUMNS = ("question", "context", "answer")
+
+
+def _threshold(value: float | None) -> float:
+    if value is None:
+        raise ValueError("threshold must be configured")
+    value = float(value)
+    if not math.isfinite(value) or value < 0:
+        raise ValueError("threshold must be a finite non-negative number")
+    return value
 
 
 class LLMMonitor(Monitor):
@@ -19,17 +30,17 @@ class LLMMonitor(Monitor):
     ):
         self.metric = metric
         self.judge = judge
-        self.threshold = threshold
+        self.threshold = _threshold(threshold)
         self.name = metric
 
     def on_batch(self, reference, batch) -> MonitorResult:
-        assert self.threshold is not None
+        threshold = _threshold(self.threshold)
         if self.judge is None:
             return MonitorResult(
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={"reason": "no judge configured"},
             )
@@ -39,7 +50,7 @@ class LLMMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="error",
                 error=f"missing required column(s): {', '.join(missing)}",
             )
@@ -48,7 +59,7 @@ class LLMMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={"reason": "empty batch"},
             )
@@ -69,7 +80,7 @@ class LLMMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={
                     "reason": "no judge results",
@@ -84,8 +95,8 @@ class LLMMonitor(Monitor):
         return MonitorResult(
             name=self.name,
             score=score,
-            alert=score > self.threshold,
-            threshold=self.threshold,
+            alert=score > threshold,
+            threshold=threshold,
             details={
                 f"mean_{self.metric}": mean,
                 "evaluated": len(valid),
