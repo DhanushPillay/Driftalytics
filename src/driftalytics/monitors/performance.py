@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 
@@ -9,6 +11,15 @@ from ..core import Monitor, MonitorResult
 
 CLASSIFICATION_METRICS = {"accuracy", "precision", "recall", "f1"}
 REGRESSION_METRICS = {"rmse", "mae", "r2"}
+
+
+def _threshold(value: float | None) -> float:
+    if value is None:
+        raise ValueError("threshold must be configured")
+    value = float(value)
+    if not math.isfinite(value) or value < 0:
+        raise ValueError("threshold must be a finite non-negative number")
+    return value
 
 
 def _classification_metrics(y_true, y_pred) -> dict[str, float]:
@@ -95,19 +106,21 @@ class PerfMonitor(Monitor):
         allowed = CLASSIFICATION_METRICS if task == "classification" else REGRESSION_METRICS
         if self.metric not in allowed:
             raise ValueError(f"metric must be one of {sorted(allowed)} for {task}")
-        self.threshold = threshold
+        self.threshold = _threshold(threshold)
+        if reference_score is not None and not math.isfinite(reference_score):
+            raise ValueError("reference_score must be finite")
         self.reference_score = reference_score
         self.name = "perf_" + task
 
     def on_batch(self, reference, batch) -> MonitorResult:
-        assert self.threshold is not None
+        threshold = _threshold(self.threshold)
         for column in ("y_true", "y_pred"):
             if column not in batch.columns:
                 return MonitorResult(
                     name=self.name,
                     score=0.0,
                     alert=False,
-                    threshold=self.threshold,
+                    threshold=threshold,
                     status="error",
                     error=f"missing required column: {column}",
                 )
@@ -116,7 +129,7 @@ class PerfMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={"reason": "empty batch"},
             )
@@ -125,7 +138,7 @@ class PerfMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="skipped",
                 details={"reason": "reference_score is required to measure degradation"},
             )
@@ -154,7 +167,7 @@ class PerfMonitor(Monitor):
                 name=self.name,
                 score=0.0,
                 alert=False,
-                threshold=self.threshold,
+                threshold=threshold,
                 status="error",
                 error=f"{type(exc).__name__}: {exc}",
             )
@@ -162,8 +175,8 @@ class PerfMonitor(Monitor):
         return MonitorResult(
             name=self.name,
             score=float(drop),
-            alert=drop > self.threshold,
-            threshold=self.threshold,
+            alert=drop > threshold,
+            threshold=threshold,
             details={
                 "metric": self.metric,
                 "value": value,
