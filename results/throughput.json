@@ -1,20 +1,49 @@
-[
-  {
-    "n": 1000,
-    "seconds": 0.0043,
-    "rows_per_sec": 233590.3,
-    "alerts": 0
-  },
-  {
-    "n": 10000,
-    "seconds": 0.0167,
-    "rows_per_sec": 600009.6,
-    "alerts": 0
-  },
-  {
-    "n": 100000,
-    "seconds": 0.0144,
-    "rows_per_sec": 6961994.5,
-    "alerts": 0
-  }
-]
+{
+  "dataset": "insects_incremental_abrupt_balanced",
+  "rows": 79986,
+  "features": 33,
+  "monitors": [
+    "psi",
+    "ks",
+    "missing_rate"
+  ],
+  "window_size": 1000,
+  "mode": "sliding",
+  "reference_rows": 5000,
+  "repeats": 3,
+  "results": [
+    {
+      "n": 1000,
+      "seconds": 0.1053,
+      "rows_per_sec": 9495.7,
+      "alerts": 1,
+      "seconds_all": [
+        0.1053,
+        0.1042,
+        0.1093
+      ]
+    },
+    {
+      "n": 10000,
+      "seconds": 1.6426,
+      "rows_per_sec": 6087.9,
+      "alerts": 15,
+      "seconds_all": [
+        1.6454,
+        1.6396,
+        1.6426
+      ]
+    },
+    {
+      "n": 100000,
+      "seconds": 28.2142,
+      "rows_per_sec": 3544.3,
+      "alerts": 176,
+      "seconds_all": [
+        27.4374,
+        28.2142,
+        28.2872
+      ]
+    }
+  ]
+}
