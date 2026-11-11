@@ -151,6 +151,15 @@ def corruptions(frame: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
     return scenarios
 
 
+def scenario_family(name: str) -> str:
+    """Keep related corruption families in the same split."""
+    if name.startswith(("distance_scale", "distance_noise")):
+        return "train"
+    if name.startswith("passenger_missing"):
+        return "validation"
+    return "test"
+
+
 def detect(frame: pd.DataFrame, reference: pd.DataFrame, window_size: int) -> dict:
     runner = SlidingWindowRunner(
         reference=reference,
@@ -207,6 +216,7 @@ def main() -> None:
         rows.append(
             {
                 "scenario": name,
+                "family": scenario_family(name),
                 "damage": min(1.0, damage),
                 **vector.as_dict(),
                 "rmse": metrics["rmse"],
@@ -217,13 +227,21 @@ def main() -> None:
     scenario_frame = pd.DataFrame(rows)
     features = scenario_frame[list(CorruptionVector.feature_names)].to_numpy(float)
     damage = scenario_frame["damage"].to_numpy(float)
-    rng = np.random.default_rng(7)
-    order = rng.permutation(len(scenario_frame))
-    split = max(1, int(0.7 * len(order)))
-    train_idx, test_idx = order[:split], order[split:]
+    masks = {
+        family: scenario_frame["family"] == family for family in ("train", "validation", "test")
+    }
+    train_idx = scenario_frame.index[masks["train"]].to_numpy()
+    validation_idx = scenario_frame.index[masks["validation"]].to_numpy()
+    test_idx = scenario_frame.index[masks["test"]].to_numpy()
 
     predictor = DamagePredictor().fit(features[train_idx], damage[train_idx])
-    damage_metrics = predictor.evaluate(features[test_idx], damage[test_idx])
+    predictor.validation_metrics_ = predictor.evaluate(
+        features[validation_idx], damage[validation_idx]
+    )
+    predictor.test_metrics_ = predictor.evaluate(features[test_idx], damage[test_idx])
+    heuristic = DamagePredictor()
+    heuristic_validation = heuristic.evaluate(features[validation_idx], damage[validation_idx])
+    heuristic_test = heuristic.evaluate(features[test_idx], damage[test_idx])
 
     clean_detection = detect(test, reference, args.window_size)
     corrupted = test.copy()
@@ -242,9 +260,21 @@ def main() -> None:
         },
         "damage_predictor": {
             "scenarios": len(scenario_frame),
+            "split": (
+                "family holdout: train distance, validation missingness, "
+                "test location/payment/combined"
+            ),
             "train_rows": len(train_idx),
+            "validation_rows": len(validation_idx),
             "test_rows": len(test_idx),
-            **damage_metrics,
+            "validation_damage_std": float(np.std(damage[validation_idx])),
+            "test_damage_std": float(np.std(damage[test_idx])),
+            "train_metrics": predictor.training_metrics_,
+            "validation_metrics": predictor.validation_metrics_,
+            "test_metrics": predictor.test_metrics_,
+            "heuristic_validation_metrics": heuristic_validation,
+            "heuristic_test_metrics": heuristic_test,
+            "caveat": "Small scenario counts and a narrow corruption family; treat as directional.",
         },
     }
 
