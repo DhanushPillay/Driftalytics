@@ -32,6 +32,11 @@ Notes:
 - Results with no eligible columns return `status="skipped"`, not a silent zero alert.
 - `details` includes `per_column` values for most monitors and `statistics`, `p_values`,
   and `rejected` for the test-based monitors.
+- Monitor constructors validate thresholds as finite and non-negative. Invalid values raise
+  `ValueError` at construction instead of failing later under `python -O`.
+- `expected_size=0` is treated as a real expected size, not as "unset". The runner sets a
+  window's expected size temporarily for each batch, including the actual size of a partial
+  tail, then restores the monitor's configured value.
 
 ## Performance monitors
 
@@ -78,7 +83,9 @@ register_monitor("row_count", RowCountMonitor)
 ```
 
 If you need the expected window size, accept it in `__init__` and expose it as
-`expected_size`; the runner fills that attribute when it is `None`.
+`expected_size`. The runner temporarily sets that attribute to the current window's
+expected size, which is the configured window size for full windows and the actual row count
+for partial tails, then restores it.
 
 ## Corruption vector and damage predictor
 
