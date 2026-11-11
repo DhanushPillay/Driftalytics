@@ -10,8 +10,10 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-The core runtime needs Python 3.10+, `numpy`, `pandas`, `scipy`, and `pyyaml`. There is
-no separate LLM extra; the judge talks to provider HTTP APIs directly.
+The core runtime needs Python 3.10+, `numpy`, `pandas`, `scipy`, and `pyyaml`. Parquet input
+requires `pyarrow`, available through the `parquet` extra (`pip install -e ".[parquet]"`) or
+the `dev` extra. There is no separate LLM extra; the judge talks to provider HTTP APIs
+directly.
 
 ## Batch example
 
@@ -52,8 +54,11 @@ print(report.n_windows, report.n_rows_analyzed, report.n_rows_skipped)
 ```
 
 `stride` defaults to `window_size`. Overlapping windows are counted once when the report
-computes analyzed and skipped rows. `include_partial=True` scores a final short window
-instead of dropping it.
+computes analyzed and skipped rows. Partial tails start at the later of the last full
+window's end and the next scheduled stride, so a stride larger than the window leaves gaps
+rather than overlapping back into scored rows. `include_partial=True` scores a final short
+window using its actual row count, which keeps volume and cardinality checks honest.
+Reports and alerts include absolute `start` and `end` offsets.
 
 ## Streaming
 
@@ -74,7 +79,10 @@ for report in runner.update(pd.DataFrame(), final=True):
 ```
 
 `run_stream(batches)` yields the same reports from an iterable. The runner buffers rows
-until a full window is available.
+until a full window is available, tracks absolute offsets across batches, and drops rows
+that fall before the next scheduled window start. `final=True` flushes at most one allowed
+partial window. Calling finalization again returns an empty list, and sending more data
+after finalization raises `RuntimeError`.
 
 ## Custom monitor
 
@@ -121,6 +129,9 @@ driftalytics run config.yaml
 driftalytics monitors
 ```
 
+Boolean keys accept YAML booleans or the strings `true`/`false`; other values are rejected.
+`monitors` must be a non-empty list of names, and output paths must be strings.
+
 To attach a trained damage model, add a JSON model path:
 
 ```yaml
@@ -132,6 +143,10 @@ Train one with:
 ```bash
 python -m driftalytics.train_damage --out models/damage_predictor.json
 ```
+
+Training uses separate train, validation, and test splits and saves all three metric sets in
+the JSON model. The saved `metrics` field is the training metric for backward compatibility;
+use `validation_metrics` and `test_metrics` for generalization.
 
 ## Next steps
 
