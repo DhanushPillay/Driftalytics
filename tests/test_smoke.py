@@ -93,7 +93,7 @@ def test_cli_version():
         check=False,
     )
     assert result.returncode == 0
-    assert "0.3.0" in result.stdout
+    assert "0.4.0" in result.stdout
 
 
 def test_cli_run_config(tmp_path):
