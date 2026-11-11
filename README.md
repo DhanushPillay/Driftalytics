@@ -9,7 +9,7 @@ while its inputs move away from the data it was trained on. Dashboards stay gree
 succeed, and quality drops silently. Driftalytics turns that displacement into a small,
 inspectable vector and uses it as an early-warning signal.
 
-> Status: v0.3.0, early development. APIs may change before 1.0.
+> Status: v0.4.0, early development. APIs may change before 1.0.
 
 ## What it does
 
@@ -133,111 +133,131 @@ All numbers below were measured on Windows 11 with Python 3.13.5 on consumer lap
 hardware. They are reproducible from the scripts in `benchmarks/`; results will vary by
 machine.
 
-### Synthetic throughput
+### Dataset
 
-Three monitors (`psi`, `ks`, `missing_rate`) over 5,000 reference rows and two numeric
-columns:
+The tabular benchmarks use the Insects `incremental_abrupt_balanced` stream from the USP
+Data Stream Repository. It contains real optical-sensor measurements of disease-vector
+insects with 33 numeric features and six classes. The row order is curated by the dataset
+authors to include incremental, abrupt, and reoccurring drift. It is not a calendar-time
+stream.
+
+| Property | Value |
+|---|---|
+| Rows | 79,986 |
+| Features | 33 numeric sensor features |
+| Classes | 2, 3, 4, 5, 11, 12 |
+| License | CC BY 4.0 |
+| Citation | Souza et al. 2020, DOI 10.1007/s10618-020-00698-5 |
+| Cache | `data/raw/insects/insects_incremental_abrupt_balanced.csv` |
+| SHA-256 | `c1cd19d4...123188b` |
+
+The loader downloads the 21 MB CSV on demand, verifies its SHA-256, and caches it under
+`data/raw/`. The dataset is not committed. Its CC BY 4.0 license is separate from the
+library's MIT license.
+
+### Real throughput
+
+Three monitors (`psi`, `ks`, `missing_rate`) over 5,000 reference rows from the real
+33-feature stream, window size 1,000, one discarded warmup, and the median of three timed
+runs. The batch is cycled from the same stream to reach each size.
 
 | Rows | Seconds | Rows/sec | Alerts |
 |---|---|---|---|
-| 1,000 | 0.0043 | 233,590 | 0 |
-| 10,000 | 0.0167 | 600,010 | 0 |
-| 100,000 | 0.0144 | 6,961,994 | 0 |
+| 1,000 | 0.1053 | 9,496 | 1 |
+| 10,000 | 1.6426 | 6,088 | 15 |
+| 100,000 | 28.2142 | 3,544 | 176 |
 
-Fixed pandas overhead dominates small batches. The 100,000-row figure is measured, not
-extrapolated to larger inputs.
+The old two-column synthetic table is gone. Its 233k to 6.9M rows/sec range measured a much
+smaller frame and is not comparable to this 33-feature workload.
 
-### Real-data drift detection
+### Natural drift detection
 
-The real dataset is NYC TLC yellow taxi trips for January 2024. The benchmark loads
-100,000 rows and splits them into 50,000 reference and 50,000 live rows, applies scale and
-missingness corruption to the live half, and evaluates 10 windows of 5,000 rows with five
-monitors.
+The script uses the first 20,000 rows as reference and the remaining 59,986 as live data. It
+runs 500-row sliding windows with five monitors. No corruption is injected.
 
 | Metric | Value |
 |---|---|
-| Rows analyzed | 50,000 |
-| Windows | 10 |
-| Runtime | 0.6183 seconds |
-| Throughput | 80,866 rows/sec |
-| Alerts across windows | 39 |
+| Live rows | 59,986 |
+| Windows | 119 |
+| Runtime | 21.3763 seconds |
+| Throughput | 2,806 rows/sec |
+| Alerts across windows | 231 |
+| Windows with an alert | 119 |
+| First alert window | 0 |
 
-Final-window scores:
+Per-monitor alert rates:
 
-| Monitor | Score | Threshold | Alert |
+| Monitor | Alerts | Alert rate |
+|---|---|---|
+| `psi` | 93 | 0.7815 |
+| `ks` | 119 | 1.0000 |
+| `missing_rate` | 0 | 0.0000 |
+| `cardinality` | 0 | 0.0000 |
+| `drift_magnitude` | 19 | 0.1597 |
+
+The first reference block is already non-stationary, so there is no clean control segment
+and no honest false-positive-rate estimate. The benchmark reports detection utility against
+realized damage instead.
+
+### Detection utility
+
+For each live window, the script trains a logistic regression on the reference period and
+measures classification error. Damage is the absolute error increase over the reference.
+Severe damage means a damage above 0.5; 22 of 119 windows qualify.
+
+| Monitor | Alert rate | Precision | Recall |
 |---|---|---|---|
-| `psi` | 0.2477 | 0.2 | yes |
-| `ks` | 0.2199 | 0.05 | yes |
-| `missing_rate` | 0.1526 | 0.05 | yes |
-| `cardinality` | 3.3755 | 0.1 | yes |
-| `drift_magnitude` | 0.1624 | 0.5 | no |
+| `psi` | 0.7815 | 0.2366 | 1.0000 |
+| `ks` | 1.0000 | 0.1849 | 1.0000 |
+| `wasserstein` | 1.0000 | 0.1849 | 1.0000 |
+| `missing_rate` | 0.0000 | 0.0000 | 0.0000 |
+| `cardinality` | 0.0000 | 0.0000 | 0.0000 |
+| `drift_magnitude` | 0.1597 | 1.0000 | 0.8636 |
 
-The cardinality alert comes from `trip_distance`. The reference values repeat after
-rounding, so a 5,000-row reference sample contains far fewer distinct values than 5,000.
-Adding Gaussian noise makes nearly every live value unique. The score compares against
-expected sample cardinality, so the window size alone is not the cause.
+`drift_magnitude` is the only high-precision monitor. It alerts on 19 windows, all severe,
+and catches 86% of severe windows. PSI and KS catch every severe window but alert on most
+windows. That is the expected trade-off on a strong, sustained drift stream.
 
-### Detection and damage prediction
+### Damage prediction
+
+The damage target is the observed classification-error increase, clipped to `[0, 1]`.
+Windows are split chronologically 60/20/20 into 73 train, 23 validation, and 23 test
+windows. The five-feature predictor uses `drift_magnitude`, `missingness_delta`,
+`cardinality_shift`, `schema_change`, and `volume_delta`.
 
 ```mermaid
 flowchart LR
-    A[100,000 NYC TLC trips] --> B[Shuffle]
-    B --> C[50,000 reference]
-    B --> D[50,000 held-out test]
-    C --> E[Fit linear fare model]
-    D --> F[Clean evaluation]
-    D --> G[26 corruption scenarios]
-    G --> H[Windowed detection]
-    G --> I[Measured performance loss]
-    I --> J[Family holdout split]
-    J --> K[11 train / 5 validation / 10 test]
-    K --> L[Damage predictor metrics]
+    A[79,986 Insects rows] --> B[20,000 reference rows]
+    A --> C[59,986 live rows]
+    B --> D[Fit logistic regression]
+    C --> E[119 windows of 500 rows]
+    D --> E
+    E --> F[Real error and log-loss]
+    F --> G[Damage = error increase]
+    E --> H[Corruption vector]
+    H --> I[DamagePredictor]
+    G --> I
+    I --> J[Chronological 73 / 23 / 23]
+    J --> K[Model vs heuristic vs drift-only]
 ```
 
-The clean linear fare model uses `trip_distance`, `trip_distance` squared,
-`passenger_count`, `payment_type`, `PULocationID`, and `DOLocationID`. It reaches MAE
-4.3848, RMSE 11.2272, and R-squared 0.7439 on the held-out half.
+The five-feature model reaches MAE 0.0530, RMSE 0.0850, and R-squared 0.8790 on the
+training windows. Held-out results:
 
-| Case | Any-alert rate |
-|---|---|
-| Clean windows | 0.0 |
-| Corrupted windows | 1.0 |
+| Predictor | Validation MAE | Test MAE | Test RMSE | Test R² |
+|---|---|---|---|---|
+| Five-feature model | 0.0224 | 0.0405 | 0.0536 | 0.9525 |
+| Drift-only OLS | 0.0284 | 0.0385 | 0.0501 | 0.9605 |
+| Untrained heuristic | 0.0410 | 0.1843 | 0.2455 | 0.4198 |
 
-Per-monitor alert rate on the corrupted run:
+Validation R-squared is numerically unstable because validation damage has low variance;
+compare MAE and RMSE there.
 
-| Monitor | Clean | Corrupted |
-|---|---|---|
-| `psi` | 0.0 | 1.0 |
-| `ks` | 0.0 | 1.0 |
-| `wasserstein` | 0.0 | 1.0 |
-| `missing_rate` | 0.0 | 1.0 |
-| `cardinality` | 0.0 | 0.0 |
-| `drift_magnitude` | 0.0 | 0.0 |
-
-The corrupted scenario scales trip distance by 1.6 and makes 15% of passenger counts
-missing. Cardinality and drift magnitude did not cross their thresholds for this
-corruption. Read the detection rate as a scenario result, not a general claim.
-
-The damage predictor uses a family-aware holdout so related corruptions cannot leak across
-splits. Distance-scaling and distance-noise scenarios train the model, passenger-missingness
-scenarios validate it, and location, payment, and combined scenarios test it:
-
-| Split | Scenarios | Model MAE | Model RMSE | Model R² | Heuristic MAE |
-|---|---|---|---|---|---|
-| Train (distance) | 11 | 0.1892 | 0.2409 | 0.6653 | — |
-| Validation (missingness) | 5 | 0.2643 | 0.2643 | n/a* | 0.0687 |
-| Test (location, payment, combined) | 10 | 0.3446 | 0.4262 | -0.0950 | 0.3087 |
-
-\* The validation target has a standard deviation of 0.0007: missing passenger counts barely
-change fare RMSE, so R-squared is numerically unstable and not meaningful there.
-
-The target is the relative RMSE increase over the clean model, clipped to `[0, 1]`. The
-fitted model does not beat the untrained heuristic on either held-out family. On the test
-split it is close but worse (MAE 0.3446 versus 0.3087), and the negative R-squared means it
-does not explain held-out variance. This is an honest negative result for cross-family
-transfer. The earlier random scenario split shared related corruptions between train and
-test and overstated accuracy. A production predictor needs labeled damage from the target
-domain, not just more synthetic distance examples.
+Only `drift_magnitude` and `cardinality_shift` vary in this stream. The other three
+corruption features are constant zero, and their fitted coefficients are zero. The
+drift-only ablation is slightly better on test (MAE 0.0385 versus 0.0405), so this benchmark
+validates drift and cardinality damage, not missingness, schema, or volume. The five-feature
+model still beats the untrained heuristic by a wide margin.
 
 ## Design choices
 
@@ -248,8 +268,9 @@ domain, not just more synthetic distance examples.
 - **Statistical tests need effect sizes.** KS and chi-square require both significance and
   a minimum effect before alerting.
 - **No hidden runtime stack.** Core dependencies are numpy, pandas, scipy, and pyyaml.
-  Parquet input is optional through `pyarrow`. Reports use escaped string formatting.
-  Damage models use JSON.
+  Parquet input is optional through `pyarrow`. Benchmark scripts use a separate `bench`
+  extra with `pyarrow` and `scikit-learn`. Reports use escaped string formatting. Damage
+  models use JSON.
 - **Window boundaries are explicit.** Reports and alerts carry absolute offsets, and
   partial windows use their real row count for volume and cardinality checks.
 - **LLM cost is bounded.** Judging is cached, sampled, retried, and capped by tokens. Failed
@@ -263,9 +284,10 @@ src/driftalytics/     library code
   core.py             monitor contract, registry, corruption vector
   runner.py           windowing, streaming, threshold resolution
   damage.py           JSON damage predictor
+  datasets.py         benchmark dataset download, cache, and validation
   report.py           HTML and JSON rendering
   llm.py              provider-agnostic judge
-benchmarks/           synthetic and real-data benchmarks
+benchmarks/           real-data benchmarks
 docs/                 architecture, monitors, API, decisions
 examples/             example configuration
 notebooks/            executable walkthroughs
@@ -286,9 +308,9 @@ tests/                unit and regression tests
 
 ## Limitations
 
-- The damage predictor is trained on simulated corruptions in the published benchmark, and
-  its linear form does not generalize across corruption families. Real deployments need
-  their own labeled damage data.
+- The published benchmark uses one real stream with a curated drift order. Only two of the
+  five corruption features vary, the reference period is not stationary, and the linear
+  damage model should be retrained on deployment-specific labels.
 - Detection quality depends on window size, monitor thresholds, and the kind of drift.
 - The library has no built-in database, scheduler, or hosted dashboard. It produces
   reports and leaves storage and delivery to the caller.
