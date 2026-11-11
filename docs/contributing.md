@@ -10,24 +10,28 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-There is no public repository URL yet. Work from a checkout you have access to.
+The public repository is at <https://github.com/DhanushPillay/Driftalytics>.
 
 ## Workflow
 
 1. Describe the change in an issue or note before large edits.
 2. Create a feature branch if you are using version control.
 3. Write code and tests.
-4. Run `ruff check src tests benchmarks`, `mypy src`, and `pytest`.
+4. Run `ruff check src tests benchmarks`, `ruff format --check src tests benchmarks`,
+   `mypy src`, and `pytest`.
 5. Keep documentation and benchmark numbers in sync with behavior.
+
+CI runs the same checks on Python 3.10, 3.11, 3.12, and 3.13.
 
 ## Standards
 
 - Type hints on public functions.
 - Tests for new monitors, thresholds, and error paths.
-- Keep core dependencies to `numpy`, `pandas`, `scipy`, and `pyyaml`.
+- Keep core dependencies to `numpy`, `pandas`, `scipy`, and `pyyaml`. Parquet support is an
+  optional `pyarrow` extra.
 - No vendored third-party code and no copied implementations.
 - Be honest in benchmarks: report detection rate, false-positive rate, throughput at
-  multiple sizes, and the hardware used.
+  multiple sizes, split strategy, and the hardware used.
 - Do not claim features that are not implemented. If a path is removed, remove it from
   the docs and config examples too.
 
