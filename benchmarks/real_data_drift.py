@@ -1,8 +1,7 @@
-"""Drift detection on NYC TLC yellow taxi trips.
+"""Natural drift detection on the Insects real dataset.
 
-Expects data/nyc_tlc/yellow_tripdata_2024-01.parquet.
-Download:
-https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet
+The first 20,000 rows form the reference period. The remaining rows are
+streamed in 500-row windows without any injected corruption.
 """
 
 from __future__ import annotations
@@ -10,93 +9,104 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from collections import Counter
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-
 from driftalytics import SlidingWindowRunner
+from driftalytics.datasets import DATASET_NAME, FEATURES, load_insects
 
-DATA = Path("data/nyc_tlc/yellow_tripdata_2024-01.parquet")
-COLUMNS = [
-    "trip_distance",
-    "fare_amount",
-    "passenger_count",
-    "payment_type",
-    "PULocationID",
-    "DOLocationID",
-    "total_amount",
-]
+MONITORS = ["psi", "ks", "missing_rate", "cardinality", "drift_magnitude"]
+REFERENCE_ROWS = 20_000
+WINDOW_SIZE = 500
 
 
-def load(n: int = 200_000) -> pd.DataFrame:
-    if not DATA.exists():
-        raise FileNotFoundError(
-            f"Missing {DATA}. Download from "
-            "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet"
-        )
-    frame = pd.read_parquet(DATA)
-    return frame[COLUMNS].dropna().head(n).reset_index(drop=True)
-
-
-def inject_drift(frame: pd.DataFrame, seed: int = 1) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    output = frame.copy()
-    output["trip_distance"] = output["trip_distance"] * 1.6 + rng.normal(0, 0.5, len(output))
-    output["fare_amount"] = output["fare_amount"] * 1.4
-    mask = rng.random(len(output)) < 0.15
-    output.loc[mask, "passenger_count"] = np.nan
-    return output
+def _result_summary(result) -> dict:
+    return {
+        "score": None if result.score is None else round(float(result.score), 6),
+        "threshold": None if result.threshold is None else round(float(result.threshold), 6),
+        "alert": bool(result.alert),
+        "status": result.status,
+        "error": result.error,
+    }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n", type=int, default=100_000)
-    parser.add_argument("--window-size", type=int, default=5000)
     parser.add_argument("--out", default="results")
+    parser.add_argument("--path", default=None)
     args = parser.parse_args()
 
-    frame = load(args.n * 2)
-    reference = frame.iloc[: args.n].reset_index(drop=True)
-    live = inject_drift(frame.iloc[args.n : args.n * 2].reset_index(drop=True))
+    frame = load_insects(args.path)
+    if not 0 < REFERENCE_ROWS < len(frame):
+        raise ValueError("reference period must leave live rows")
 
+    reference = frame.iloc[:REFERENCE_ROWS]
+    live = frame.iloc[REFERENCE_ROWS:]
     runner = SlidingWindowRunner(
-        reference=reference,
-        monitors=["psi", "ks", "missing_rate", "cardinality", "drift_magnitude"],
-        window_size=args.window_size,
+        reference=reference[FEATURES],
+        monitors=MONITORS,
+        window_size=WINDOW_SIZE,
+        stride=WINDOW_SIZE,
         sliding=True,
-        stride=args.window_size,
         include_partial=False,
     )
+
     start = time.perf_counter()
-    report = runner.run(live)
+    report = runner.run(live[FEATURES])
     elapsed = time.perf_counter() - start
-    summary = {
+
+    windows = report.window_summaries
+    alert_counts = Counter(alert.monitor for alert in report.alerts)
+    per_monitor = {
+        name: {
+            "alerts": alert_counts.get(name, 0),
+            "alert_rate": round(alert_counts.get(name, 0) / max(len(windows), 1), 4),
+        }
+        for name in MONITORS
+    }
+    timeline = [
+        {
+            "window": int(window["window"]),
+            "start": REFERENCE_ROWS + int(window["start"]),
+            "end": REFERENCE_ROWS + int(window["end"]),
+            "n_rows": int(window["n_rows"]),
+            "alerts": [alert.monitor for alert in window["alerts"]],
+            "results": {result.name: _result_summary(result) for result in window["results"]},
+        }
+        for window in windows
+    ]
+    alerting_windows = sum(1 for window in windows if window["alerts"])
+    payload = {
+        "dataset": DATASET_NAME,
+        "total_rows": len(frame),
+        "reference_rows": len(reference),
         "rows": len(live),
-        "window_size": args.window_size,
+        "window_size": WINDOW_SIZE,
+        "windows": len(windows),
+        "rows_skipped": report.n_rows_skipped,
         "seconds": round(elapsed, 4),
         "rows_per_sec": round(len(live) / elapsed, 1),
-        "windows": report.n_windows,
         "alerts": len(report.alerts),
-        "results": [
-            {
-                "monitor": result.name,
-                "score": round(result.score, 6),
-                "threshold": result.threshold,
-                "alert": result.alert,
-                "status": result.status,
-            }
-            for result in report.results
-        ],
+        "alerting_windows": alerting_windows,
+        "alert_rate": round(alerting_windows / max(len(windows), 1), 4),
+        "first_alert_window": min((alert.window for alert in report.alerts), default=None),
+        "per_monitor": per_monitor,
+        "reference_class_counts": {
+            str(int(key)): int(value)
+            for key, value in reference["class"].value_counts().sort_index().items()
+        },
+        "live_class_counts": {
+            str(int(key)): int(value)
+            for key, value in live["class"].value_counts().sort_index().items()
+        },
+        "timeline": timeline,
     }
+
     output = Path(args.out)
     output.mkdir(parents=True, exist_ok=True)
-    (output / "real_data_drift.json").write_text(
-        json.dumps(summary, indent=2),
-        encoding="utf-8",
-    )
+    (output / "real_data_drift.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(report.summary())
-    print(json.dumps(summary, indent=2))
+    print(json.dumps({key: value for key, value in payload.items() if key != "timeline"}, indent=2))
 
 
 if __name__ == "__main__":
