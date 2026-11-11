@@ -27,10 +27,37 @@
   },
   "damage_predictor": {
     "scenarios": 26,
-    "train_rows": 18,
-    "test_rows": 8,
-    "mae": 0.25355887137166805,
-    "rmse": 0.31395388613114933,
-    "r2": 0.42994325214683293
+    "split": "family holdout: train distance, validation missingness, test location/payment/combined",
+    "train_rows": 11,
+    "validation_rows": 5,
+    "test_rows": 10,
+    "validation_damage_std": 0.0007035481812323354,
+    "test_damage_std": 0.4073019439666174,
+    "train_metrics": {
+      "mae": 0.1892334675060785,
+      "rmse": 0.24090268761471542,
+      "r2": 0.6653475106154987
+    },
+    "validation_metrics": {
+      "mae": 0.2643197529736562,
+      "rmse": 0.26432019083395725,
+      "r2": -141146.43458049273
+    },
+    "test_metrics": {
+      "mae": 0.3446170364166947,
+      "rmse": 0.42621962951967757,
+      "r2": -0.0950499475398141
+    },
+    "heuristic_validation_metrics": {
+      "mae": 0.06870532139193433,
+      "rmse": 0.06896180707918834,
+      "r2": -9606.924399888487
+    },
+    "heuristic_test_metrics": {
+      "mae": 0.3086896624743885,
+      "rmse": 0.45795708095363086,
+      "r2": -0.2642023439078771
+    },
+    "caveat": "Small scenario counts and a narrow corruption family; treat as directional."
   }
 }
