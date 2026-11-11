@@ -16,6 +16,7 @@ from driftalytics import (
     compute_corruption_vector,
 )
 from driftalytics.cli import _as_bool, run_config
+from driftalytics.datasets import COLUMNS, load_insects
 from driftalytics.llm import LLMJudge, OpenAIProvider
 from driftalytics.monitors.llm_monitors import LLMMonitor
 from driftalytics.monitors.performance import (
@@ -41,6 +42,27 @@ def _data(n=500, seed=0, shift=0.0):
             "b": rng.normal(size=n),
         }
     )
+
+
+def _write_damage_csv(path, rows=30, seed=0):
+    rng = np.random.default_rng(seed)
+    frame = pd.DataFrame(
+        {
+            "drift_magnitude": rng.uniform(0, 1, rows),
+            "missingness_delta": rng.uniform(0, 0.2, rows),
+            "cardinality_shift": rng.uniform(0, 0.5, rows),
+            "schema_change": rng.uniform(0, 0.2, rows),
+            "volume_delta": rng.uniform(0, 0.2, rows),
+        }
+    )
+    frame["damage"] = np.clip(
+        0.3 * frame["drift_magnitude"]
+        + 0.2 * frame["missingness_delta"]
+        + 0.1 * frame["cardinality_shift"],
+        0,
+        1,
+    )
+    frame.to_csv(path, index=False)
 
 
 class FakeProvider:
@@ -278,8 +300,10 @@ def test_damage_predictor_fit_save_load(tmp_path):
 
 
 def test_train_damage_writes_json(tmp_path):
+    data = tmp_path / "damage.csv"
+    _write_damage_csv(data)
     path = tmp_path / "model.json"
-    train_and_save(str(path), n=300, seed=2)
+    train_and_save(str(path), str(data))
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["format"] == "driftalytics-damage-v1"
     assert len(payload["coef"]) == 5
@@ -610,14 +634,32 @@ def test_damage_metrics_and_invalid_model_payload(tmp_path):
 
 
 def test_train_damage_saves_validation_and_test_metrics(tmp_path):
+    data = tmp_path / "damage.csv"
+    _write_damage_csv(data)
     path = tmp_path / "model.json"
-    train_and_save(str(path), n=300, seed=2)
+    train_and_save(str(path), str(data))
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["metrics"] == payload["training_metrics"]
     assert payload["validation_metrics"]
     assert payload["test_metrics"]
     with pytest.raises(ValueError):
-        train_and_save(str(path), n=300, test_size=0.6)
+        train_and_save(str(path), str(data), test_size=0.6)
+
+
+def test_train_damage_rejects_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        train_and_save(str(tmp_path / "model.json"), str(tmp_path / "missing.csv"))
+
+
+def test_load_insects_parses_headerless_fixture(tmp_path):
+    path = tmp_path / "insects.csv"
+    first = ",".join(str(value) for value in range(1, 34)) + ",2"
+    second = ",".join(str(value) for value in range(2, 35)) + ",3"
+    path.write_text(f"{first}\n{second}\n", encoding="utf-8")
+    frame = load_insects(path, validate=False)
+    assert list(frame.columns) == COLUMNS
+    assert frame.shape == (2, 34)
+    assert frame["class"].tolist() == [2, 3]
 
 
 def test_monitor_edge_cases_and_validation():
