@@ -1,7 +1,7 @@
 {
-  "dataset": "insects_incremental_abrupt_balanced",
-  "rows": 79986,
-  "features": 33,
+  "dataset": "cicids2017",
+  "rows": 2827677,
+  "features": 68,
   "monitors": [
     "psi",
     "ks",
@@ -10,40 +10,98 @@
   "window_size": 1000,
   "mode": "sliding",
   "reference_rows": 5000,
-  "repeats": 3,
+  "repeat_policy": "three timed runs after one warmup for 1k-100k; single run for 1M",
   "results": [
     {
       "n": 1000,
-      "seconds": 0.1053,
-      "rows_per_sec": 9495.7,
+      "seconds": 0.0885,
+      "rows_per_sec": 11302.9,
+      "windows": 1,
       "alerts": 1,
+      "repeats": 3,
       "seconds_all": [
-        0.1053,
-        0.1042,
-        0.1093
+        0.0907,
+        0.088,
+        0.0885
       ]
     },
     {
       "n": 10000,
-      "seconds": 1.6426,
-      "rows_per_sec": 6087.9,
-      "alerts": 15,
+      "seconds": 0.8117,
+      "rows_per_sec": 12319.2,
+      "windows": 10,
+      "alerts": 14,
+      "repeats": 3,
       "seconds_all": [
-        1.6454,
-        1.6396,
-        1.6426
+        0.8117,
+        0.8288,
+        0.8108
       ]
     },
     {
       "n": 100000,
-      "seconds": 28.2142,
-      "rows_per_sec": 3544.3,
-      "alerts": 176,
+      "seconds": 8.2652,
+      "rows_per_sec": 12099.0,
+      "windows": 100,
+      "alerts": 190,
+      "repeats": 3,
       "seconds_all": [
-        27.4374,
-        28.2142,
-        28.2872
+        8.1207,
+        8.2652,
+        20.6177
+      ]
+    },
+    {
+      "n": 1000000,
+      "seconds": 157.3149,
+      "rows_per_sec": 6356.7,
+      "windows": 1000,
+      "alerts": 1899,
+      "repeats": 1,
+      "seconds_all": [
+        157.3149
       ]
     }
-  ]
+  ],
+  "per_monitor": {
+    "psi": {
+      "n": 100000,
+      "seconds": 1.7685,
+      "rows_per_sec": 56544.4,
+      "windows": 100,
+      "alerts": 91,
+      "repeats": 3,
+      "seconds_all": [
+        1.7598,
+        1.802,
+        1.7685
+      ]
+    },
+    "ks": {
+      "n": 100000,
+      "seconds": 5.9476,
+      "rows_per_sec": 16813.4,
+      "windows": 100,
+      "alerts": 99,
+      "repeats": 3,
+      "seconds_all": [
+        5.7759,
+        5.9476,
+        5.9763
+      ]
+    },
+    "missing_rate": {
+      "n": 100000,
+      "seconds": 0.5115,
+      "rows_per_sec": 195515.1,
+      "windows": 100,
+      "alerts": 0,
+      "repeats": 3,
+      "seconds_all": [
+        0.51,
+        0.5115,
+        0.5159
+      ]
+    }
+  }
 }
