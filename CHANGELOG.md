@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.5.0
+
+### Changed
+
+- Replaced the Insects benchmark with CICIDS2017: 2,827,677 network flows with 68 numeric
+  features, real timestamps, a benign-only 3 July control period, and natural attacks on
+  4-7 July.
+- `drift_magnitude` is now the maximum Population Stability Index across numeric columns
+  instead of a mean standardized mean shift. The old metric let near-zero-variance columns
+  dominate and ignored distribution shape.
+- `KSMonitor` uses the asymptotic KS test when either sample exceeds 1,000 rows and caches
+  reference arrays between windows. The exact test remains for small samples.
+- `WassersteinMonitor` treats a reference scale below `1e-12` as degenerate instead of
+  dividing by a near-zero value.
+- The detection benchmark now uses per-day exchangeable benign reference/control splits plus
+  chronological same-day live windows. It reports default-threshold alert rates, score AUC,
+  and recall at a 5% control false-positive rate.
+- The damage benchmark trains on 3 July benign traffic plus 4 July attacks, scores a
+  held-out 3 July benign control, and streams 5-7 July. It reports raw and balanced damage,
+  prior-only and drift-only baselines, an untrained heuristic, and bootstrap confidence
+  intervals.
+
+### Added
+
+- `load_cicids`, which downloads the CICIDS2017 parquet, verifies its SHA-256, parses the
+  mixed timestamp formats, sorts by time, and validates the schema and row counts.
+- `results/cicids_detection_windows.csv` and `results/cicids_damage_windows.csv`.
+- Tests for CICIDS parsing, the KS asymptotic and cache paths, near-zero-scale corruption
+  and Wasserstein behavior, and `exact_threshold` validation.
+
+### Removed
+
+- The Insects loader, cached CSV, and `results/insects_damage_windows.csv`.
+- The cached NYC TLC parquet.
+
+### Verification
+
+- `pytest`: 47 passed.
+- `ruff check src tests benchmarks`: passed.
+- `ruff format --check src tests benchmarks`: passed.
+- `mypy src`: passed, 14 source files.
+- CLI version: 0.5.0.
+- Throughput (68 features, 3 monitors, streaming): 11,302.9 / 12,319.2 / 12,099.0 rows/sec
+  at 1k / 10k / 100k rows, and 6,356.7 rows/sec at 1M rows.
+- Detection: 0 alerts across 200 exchangeable control windows; pooled AUC 0.9878 (`psi`)
+  and 0.9940 (`ks`); recall at 5% control FPR 1.0000 for both; live benign alert rate
+  0.9412, which reflects temporal benign drift.
+- Damage: held-out test MAE 0.1097 and R² 0.7503 for the five-feature model; drift-only
+  MAE 0.0951 and R² 0.9252; label-derived prior oracle MAE 0.0604 and R² 0.9901;
+  balanced-target model R² -0.0204.
+
 ## 0.4.0
 
 ### Changed
