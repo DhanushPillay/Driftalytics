@@ -12,6 +12,7 @@ from ..core import (
     MonitorResult,
     compute_corruption_vector,
     expected_cardinality,
+    psi,
 )
 
 
@@ -81,26 +82,6 @@ def _bh_reject(p_values: list[float], alpha: float) -> list[bool]:
     return rejected.tolist()
 
 
-def _psi_col(reference, batch, n_bins: int) -> float:
-    ref_values = _float_values(reference)
-    batch_values = _float_values(batch)
-    if not len(ref_values) or not len(batch_values):
-        return 0.0
-
-    quantiles = np.unique(np.quantile(ref_values, np.linspace(0, 1, n_bins + 1)))
-    if len(quantiles) < 2:
-        edges = np.array([-np.inf, float(ref_values[0]), np.inf])
-    else:
-        interior = quantiles[1:-1]
-        edges = np.concatenate(([-np.inf], interior, [np.inf]))
-
-    ref_counts, _ = np.histogram(ref_values, bins=edges)
-    batch_counts, _ = np.histogram(batch_values, bins=edges)
-    ref_share = np.clip(ref_counts / max(len(ref_values), 1), 1e-6, None)
-    batch_share = np.clip(batch_counts / max(len(batch_values), 1), 1e-6, None)
-    return float(np.sum((batch_share - ref_share) * np.log(batch_share / ref_share)))
-
-
 class PSIMonitor(Monitor):
     name = "psi"
 
@@ -113,7 +94,7 @@ class PSIMonitor(Monitor):
     def on_batch(self, reference, batch) -> MonitorResult:
         threshold = _threshold(self.threshold)
         columns = _numeric_columns(reference, batch)
-        values = {c: _psi_col(reference[c], batch[c], self.n_bins) for c in columns}
+        values = {c: psi(reference[c], batch[c], self.n_bins) for c in columns}
         if not values:
             return MonitorResult(
                 name=self.name,
@@ -136,23 +117,50 @@ class PSIMonitor(Monitor):
 class KSMonitor(Monitor):
     name = "ks"
 
-    def __init__(self, alpha: float = 0.05, min_effect: float = 0.1):
+    def __init__(
+        self,
+        alpha: float = 0.05,
+        min_effect: float = 0.1,
+        exact_threshold: int = 1000,
+    ):
         self.alpha = _threshold(alpha)
         self.threshold = self.alpha
         self.min_effect = _threshold(min_effect)
+        if exact_threshold <= 0:
+            raise ValueError("exact_threshold must be greater than 0")
+        self.exact_threshold = int(exact_threshold)
+        self._cached_reference = None
+        self._cached_columns: tuple[str, ...] = ()
+        self._cached_values: dict[str, np.ndarray] = {}
+
+    def _reference_values(self, reference, columns: list[str]) -> dict[str, np.ndarray]:
+        if reference is not self._cached_reference or tuple(columns) != self._cached_columns:
+            self._cached_reference = reference
+            self._cached_columns = tuple(columns)
+            self._cached_values = {column: _float_values(reference[column]) for column in columns}
+        return self._cached_values
 
     def on_batch(self, reference, batch) -> MonitorResult:
         threshold = _threshold(self.threshold)
+        columns = _numeric_columns(reference, batch)
+        reference_values = self._reference_values(reference, columns)
         statistics: dict[str, float] = {}
         p_values: dict[str, float] = {}
-        for column in _numeric_columns(reference, batch):
-            ref_values = _float_values(reference[column])
+        methods: dict[str, str] = {}
+        for column in columns:
+            ref_values = reference_values[column]
             batch_values = _float_values(batch[column])
             if not len(ref_values) or not len(batch_values):
                 continue
-            result = stats.ks_2samp(ref_values, batch_values)
+            method = (
+                "exact"
+                if max(len(ref_values), len(batch_values)) <= self.exact_threshold
+                else "asymp"
+            )
+            result = stats.ks_2samp(ref_values, batch_values, method=method)
             statistics[column] = float(result.statistic)
             p_values[column] = float(result.pvalue)
+            methods[column] = method
 
         if not statistics:
             return MonitorResult(
@@ -180,6 +188,7 @@ class KSMonitor(Monitor):
                 "statistics": statistics,
                 "p_values": p_values,
                 "rejected": effective,
+                "methods": methods,
                 "min_effect": self.min_effect,
             },
         )
@@ -200,7 +209,7 @@ class WassersteinMonitor(Monitor):
             if not len(ref_values) or not len(batch_values):
                 continue
             scale = float(np.std(ref_values))
-            if not np.isfinite(scale) or scale == 0.0:
+            if not np.isfinite(scale) or scale < 1e-12:
                 scale = 1.0
             values[column] = float(stats.wasserstein_distance(ref_values, batch_values) / scale)
         if not values:
