@@ -57,25 +57,54 @@ Core runtime: `numpy`, `pandas`, `scipy`, `pyyaml`. Development dependencies are
 The LLM judge uses the standard library HTTP client, so `openai` and `anthropic` SDKs are
 not required.
 
+## Corruption-vector drift magnitude
+
+`drift_magnitude` is the maximum Population Stability Index across numeric columns, not the
+mean standardized difference of means. A standardized mean shift is dominated by columns with
+near-zero reference variance, ignores changes in distribution shape, and saturated on
+near-constant flow features. PSI compares binned distributions on reference quantiles, so it
+reacts to shape and tail movement and stays finite when a column barely varies. The monitor
+and the corruption vector share one implementation.
+
 ## Real-data benchmarks
 
-All tabular benchmarks use the Insects `incremental_abrupt_balanced` stream: 79,986 real
-optical-sensor measurements, 33 numeric features, and six classes. The row order is curated
-by the dataset authors to include incremental, abrupt, and reoccurring drift. It is real
-measurement data, not a calendar-time stream.
+All tabular benchmarks use CICIDS2017 network-flow records from the Canadian Institute for
+Cybersecurity, mirrored on Hugging Face under Apache-2.0. The file has 2,827,677 flows, 68
+numeric features, real timestamps, and a binary benign/attack label. July 3 is a benign-only
+capture, so it supplies both the reference sample and a held-out control. July 4-7 carry
+patator, DoS, web, bot, DDoS, and port-scan traffic, so they supply natural drift without
+injected corruption.
 
-The loader downloads the CSV on demand, verifies its SHA-256, and caches it under
-`data/raw/`. The dataset is not committed. Its CC BY 4.0 license is separate from the
-library's MIT license.
+The loader downloads the parquet file on demand, verifies its SHA-256, parses mixed timestamp
+formats, drops constant columns, and caches the file under `data/raw/`. The dataset is not
+committed. Its Apache-2.0 license is separate from the library's MIT license.
 
-Damage labels are observed chronological error increases from a classifier trained on the
-first 20,000 rows. The damage predictor uses a chronological split, not a random one. This
-keeps future windows out of training and matches how the monitor would be used in
-production.
+The detection benchmark draws an exchangeable reference and control split from each day's
+benign traffic, then streams the rest of the day chronologically. Benign temporal drift alone
+saturates alert thresholds, so the control split, not an earlier time slice, defines the
+false-positive rate. Results report default-threshold alert rates, score AUC, and recall at a
+5% control false-positive rate.
 
-The stream exercises only `drift_magnitude` and `cardinality_shift`; missingness, schema,
-and volume stay constant. The benchmark therefore reports a drift-only ablation alongside
-the five-feature model. It does not claim that the unused dimensions are validated.
+The damage benchmark trains on July 3 benign traffic and July 4 attacks, calibrates on a
+held-out July 3 benign control, and streams July 5-7. Damage is the observed
+classification-error increase over that control. Each day has a different attack mix and its
+benign traffic also moves, so the benchmark reports raw and balanced damage, a prior-only
+baseline, a drift-only baseline, an untrained heuristic, and bootstrap confidence intervals.
+It does not claim that the unused corruption features are validated.
+
+## Version 0.5 benchmark migration
+
+The 0.5 release replaces the Insects stream with CICIDS2017:
+
+- The dataset grows from 79,986 curated rows to 2,827,677 timestamped network flows with a
+  benign-only control day and four days of natural attacks.
+- `KSMonitor` uses the asymptotic test above 1,000 samples and caches reference arrays. The
+  exact test was the throughput bottleneck on 68 columns.
+- `WassersteinMonitor` treats scales below `1e-12` as degenerate instead of dividing by them.
+- Detection and damage evaluation are separate scripts. Detection reports calibrated alert
+  rates and AUC; damage reports observed error increase against a held-out control.
+- The damage benchmark adds prior-only and drift-only baselines plus bootstrap confidence
+  intervals, because attack prevalence moves from 0% to 41% across the capture.
 
 ## Version 0.2 scope
 
