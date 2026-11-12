@@ -9,7 +9,7 @@ while its inputs move away from the data it was trained on. Dashboards stay gree
 succeed, and quality drops silently. Driftalytics turns that displacement into a small,
 inspectable vector and uses it as an early-warning signal.
 
-> Status: v0.4.0, early development. APIs may change before 1.0.
+> Status: v0.5.0, early development. APIs may change before 1.0.
 
 ## What it does
 
@@ -93,7 +93,7 @@ Each window is summarized without labels:
 
 | Feature | Meaning |
 |---|---|
-| `drift_magnitude` | Mean standardized shift in numeric column means |
+| `drift_magnitude` | Maximum PSI across numeric column distributions |
 | `missingness_delta` | Mean change in missing-value rate |
 | `cardinality_shift` | Change in distinct values against expected sample cardinality |
 | `schema_change` | Fraction of columns added, removed, or retyped |
@@ -116,7 +116,7 @@ enough labeled damage data.
 | `chi_square` | Categorical association with BH correction and Cramer's V |
 | `volume` | Row-count deviation from the expected window size |
 | `schema_change` | Missing, new, or retyped columns |
-| `drift_magnitude` | Mean standardized numeric shift from the corruption vector |
+| `drift_magnitude` | Maximum PSI across numeric columns from the corruption vector |
 | `perf_classification` | Accuracy, precision, recall, or weighted F1 drop |
 | `perf_regression` | RMSE, MAE, or R-squared change |
 | `faithfulness` | LLM answer groundedness against retrieved context |
@@ -135,129 +135,163 @@ machine.
 
 ### Dataset
 
-The tabular benchmarks use the Insects `incremental_abrupt_balanced` stream from the USP
-Data Stream Repository. It contains real optical-sensor measurements of disease-vector
-insects with 33 numeric features and six classes. The row order is curated by the dataset
-authors to include incremental, abrupt, and reoccurring drift. It is not a calendar-time
-stream.
+The tabular benchmarks use CICIDS2017 network-flow data: 2.8 million real flows with 68
+numeric flow features and a binary benign/attack label. July 3 is benign-only and serves
+as the reference and control period. July 4-7 contain natural attacks, so drift is not
+injected.
 
 | Property | Value |
 |---|---|
-| Rows | 79,986 |
-| Features | 33 numeric sensor features |
-| Classes | 2, 3, 4, 5, 11, 12 |
-| License | CC BY 4.0 |
-| Citation | Souza et al. 2020, DOI 10.1007/s10618-020-00698-5 |
-| Cache | `data/raw/insects/insects_incremental_abrupt_balanced.csv` |
-| SHA-256 | `c1cd19d4...123188b` |
+| Rows | 2,827,677 |
+| Features | 68 numeric flow features |
+| Labels | Binary `label` plus `attack_label` |
+| Period | 2017-07-03 to 2017-07-07 |
+| Attack rows | 556,555 |
+| License | Apache-2.0 dataset packaging |
+| Citation | Sharafaldin et al. 2018, DOI 10.5220/0006639801080116 |
+| Cache | `data/raw/cicids2017/CICIDS_Flow.parquet` |
+| SHA-256 | `e64f6adf...0dda35` |
 
-The loader downloads the 21 MB CSV on demand, verifies its SHA-256, and caches it under
-`data/raw/`. The dataset is not committed. Its CC BY 4.0 license is separate from the
-library's MIT license.
+The loader downloads the 370 MB parquet on demand, verifies its SHA-256, parses the mixed
+timestamp formats, maps `BENIGN` to 0, sorts by time, and casts features to `float32`.
+The dataset is not committed. Its Apache-2.0 terms are separate from the library's MIT
+license.
+
+Daily composition:
+
+| Day | Rows | Attacks | Attack rate | Attack families |
+|---|---:|---:|---:|---|
+| 2017-07-03 | 529,450 | 0 | 0.0000 | none |
+| 2017-07-04 | 445,641 | 13,832 | 0.0310 | FTP-Patator, SSH-Patator |
+| 2017-07-05 | 691,390 | 251,722 | 0.3641 | DoS Hulk, GoldenEye, slowloris, Slowhttptest, Heartbleed |
+| 2017-07-06 | 458,483 | 2,216 | 0.0048 | web attacks, Infiltration |
+| 2017-07-07 | 702,713 | 288,785 | 0.4110 | Bot, DDoS, PortScan |
 
 ### Real throughput
 
-Three monitors (`psi`, `ks`, `missing_rate`) over 5,000 reference rows from the real
-33-feature stream, window size 1,000, one discarded warmup, and the median of three timed
-runs. The batch is cycled from the same stream to reach each size.
+Three monitors (`psi`, `ks`, `missing_rate`) over 5,000 reference rows, window size 1,000,
+and a 100,000-row streaming chunk. The batch is cycled from the same data to reach each
+size. Sizes up to 100,000 use three timed runs after one warmup (median shown). The 1M
+case uses one timed run.
 
-| Rows | Seconds | Rows/sec | Alerts |
-|---|---|---|---|
-| 1,000 | 0.1053 | 9,496 | 1 |
-| 10,000 | 1.6426 | 6,088 | 15 |
-| 100,000 | 28.2142 | 3,544 | 176 |
+| Rows | Seconds | Rows/sec | Windows | Monitor alerts |
+|---:|---:|---:|---:|---:|
+| 1,000 | 0.0885 | 11,303 | 1 | 1 |
+| 10,000 | 0.8117 | 12,319 | 10 | 14 |
+| 100,000 | 8.2652 | 12,099 | 100 | 190 |
+| 1,000,000 | 157.3149 | 6,357 | 1,000 | 1,899 |
 
-The old two-column synthetic table is gone. Its 233k to 6.9M rows/sec range measured a much
-smaller frame and is not comparable to this 33-feature workload.
+Per-monitor throughput at 100,000 rows:
 
-### Natural drift detection
+| Monitor | Seconds | Rows/sec | Alerts |
+|---|---:|---:|---:|
+| `psi` | 1.7685 | 56,544 | 91 |
+| `ks` | 5.9476 | 16,813 | 99 |
+| `missing_rate` | 0.5115 | 195,515 | 0 |
 
-The script uses the first 20,000 rows as reference and the remaining 59,986 as live data. It
-runs 500-row sliding windows with five monitors. No corruption is injected.
+Streaming is faster than a single `run()` call on this dataset. One isolated comparison on
+1M rows measured 183 seconds through `update()` versus 266 seconds through `run()`, so the
+benchmark uses the streaming path.
 
-| Metric | Value |
-|---|---|
-| Live rows | 59,986 |
-| Windows | 119 |
-| Runtime | 21.3763 seconds |
-| Throughput | 2,806 rows/sec |
-| Alerts across windows | 231 |
-| Windows with an alert | 119 |
-| First alert window | 0 |
+### Attack detection
 
-Per-monitor alert rates:
+Each day gets a random, exchangeable split of its benign rows: 50,000 for reference and
+50,000 for control. The remaining rows are streamed chronologically in 1,000-row windows.
+A window is an attack window when at least half of its rows are attacks. The control split
+measures false positives under exchangeability; the live stream also contains temporal
+benign drift.
 
-| Monitor | Alerts | Alert rate |
-|---|---|---|
-| `psi` | 93 | 0.7815 |
-| `ks` | 119 | 1.0000 |
-| `missing_rate` | 0 | 0.0000 |
-| `cardinality` | 0 | 0.0000 |
-| `drift_magnitude` | 19 | 0.1597 |
+| Day | Attack rate | Windows | Attack windows | Control alerts | Live benign alert rate | Attack alert rate |
+|---|---:|---:|---:|---:|---:|---:|
+| 2017-07-04 | 0.0310 | 345 | 0 | 0/50 | 0.8773 | 0.0000 |
+| 2017-07-05 | 0.3641 | 591 | 260 | 0/50 | 0.9225 | 1.0000 |
+| 2017-07-06 | 0.0048 | 358 | 0 | 0/50 | 1.0000 | 0.0000 |
+| 2017-07-07 | 0.4110 | 602 | 297 | 0/50 | 0.9605 | 1.0000 |
+| Pooled | 0.3072 | 1,896 | 557 | 0/200 | 0.9412 | 1.0000 |
 
-The first reference block is already non-stationary, so there is no clean control segment
-and no honest false-positive-rate estimate. The benchmark reports detection utility against
-realized damage instead.
+Pooled monitor metrics:
 
-### Detection utility
+| Monitor | Control alert rate | Live benign alert rate | Attack alert rate | AUC | Recall at 5% control FPR |
+|---|---:|---:|---:|---:|---:|
+| `psi` | 0.0000 | 0.6441 | 1.0000 | 0.9878 | 1.0000 |
+| `ks` | 0.0000 | 0.9412 | 1.0000 | 0.9940 | 1.0000 |
+| `missing_rate` | 0.0000 | 0.0000 | 0.0000 | 0.5000 | 0.0000 |
 
-For each live window, the script trains a logistic regression on the reference period and
-measures classification error. Damage is the absolute error increase over the reference.
-Severe damage means a damage above 0.5; 22 of 119 windows qualify.
+The exchangeable control never alerts, so the monitors are not firing on sampling noise.
+Live benign traffic still drifts across each day, which is why the default alert rate on
+benign windows is high. Treat a default alert as "the distribution moved", not "the model
+is damaged". Ranking quality is high: both `psi` and `ks` separate attack windows from
+benign windows with AUC above 0.98 and catch every attack window at a threshold calibrated
+to 5% control false positives.
 
-| Monitor | Alert rate | Precision | Recall |
-|---|---|---|---|
-| `psi` | 0.7815 | 0.2366 | 1.0000 |
-| `ks` | 1.0000 | 0.1849 | 1.0000 |
-| `wasserstein` | 1.0000 | 0.1849 | 1.0000 |
-| `missing_rate` | 0.0000 | 0.0000 | 0.0000 |
-| `cardinality` | 0.0000 | 0.0000 | 0.0000 |
-| `drift_magnitude` | 0.1597 | 1.0000 | 0.8636 |
-
-`drift_magnitude` is the only high-precision monitor. It alerts on 19 windows, all severe,
-and catches 86% of severe windows. PSI and KS catch every severe window but alert on most
-windows. That is the expected trade-off on a strong, sustained drift stream.
+July 4 and July 6 contain no majority-attack windows because their attacks are sparse and
+spread across mixed windows. Attack recall is therefore only measurable on July 5 and
+July 7. `missing_rate` never fires because CICIDS has no missing values.
 
 ### Damage prediction
 
-The damage target is the observed classification-error increase, clipped to `[0, 1]`.
-Windows are split chronologically 60/20/20 into 73 train, 23 validation, and 23 test
-windows. The five-feature predictor uses `drift_magnitude`, `missingness_delta`,
-`cardinality_shift`, `schema_change`, and `volume_delta`.
+A logistic regression is trained on 50,000 benign July 3 flows plus all 13,832 July 4
+attacks, then evaluated on a held-out 50,000-row benign July 3 control. Damage is the
+observed increase in classification error over the control error of 0.04548, clipped to
+`[0, 1]`. Balanced damage uses balanced error and removes the class-prior component.
 
 ```mermaid
 flowchart LR
-    A[79,986 Insects rows] --> B[20,000 reference rows]
-    A --> C[59,986 live rows]
-    B --> D[Fit logistic regression]
-    C --> E[119 windows of 500 rows]
-    D --> E
-    E --> F[Real error and log-loss]
-    F --> G[Damage = error increase]
-    E --> H[Corruption vector]
-    H --> I[DamagePredictor]
-    G --> I
-    I --> J[Chronological 73 / 23 / 23]
-    J --> K[Model vs heuristic vs drift-only]
+    A[2,827,677 CICIDS flows] --> B[50k benign Jul 3 + 13.8k attacks Jul 4]
+    A --> C[50k held-out benign Jul 3 control]
+    A --> D[1.85M live rows Jul 5-7]
+    B --> E[StandardScaler + logistic regression]
+    E --> C
+    E --> D
+    D --> F[370 windows of 5,000 rows]
+    F --> G[Raw and balanced error]
+    F --> H[Corruption vector]
+    C --> I[Control error 0.0455]
+    G --> J[Damage = error increase]
+    I --> J
+    H --> K[DamagePredictor]
+    J --> K
+    K --> L[Chronological 222 / 74 / 74]
+    L --> M[Model vs prior-only vs drift-only vs heuristic]
 ```
 
-The five-feature model reaches MAE 0.0530, RMSE 0.0850, and R-squared 0.8790 on the
-training windows. Held-out results:
+Across 370 live windows, mean raw damage is 0.2381, mean balanced damage is 0.2453, 102
+windows have zero damage, and 97 exceed 0.5.
 
-| Predictor | Validation MAE | Test MAE | Test RMSE | Test R² |
-|---|---|---|---|---|
-| Five-feature model | 0.0224 | 0.0405 | 0.0536 | 0.9525 |
-| Drift-only OLS | 0.0284 | 0.0385 | 0.0501 | 0.9605 |
-| Untrained heuristic | 0.0410 | 0.1843 | 0.2455 | 0.4198 |
+| Day | Windows | Raw damage mean | Raw damage median | Raw damage max | Balanced damage mean | Attack share | Drift magnitude |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 2017-07-05 | 139 | 0.3542 | 0.0473 | 0.9379 | 0.2782 | 0.3622 | 1.4392 |
+| 2017-07-06 | 91 | 0.1526 | 0.0285 | 0.7405 | 0.2860 | 0.0049 | 0.4466 |
+| 2017-07-07 | 140 | 0.1784 | 0.0072 | 0.9531 | 0.1860 | 0.4124 | 2.3073 |
 
-Validation R-squared is numerically unstable because validation damage has low variance;
-compare MAE and RMSE there.
+July 6 has almost no attacks, yet balanced damage averages 0.2860. Benign traffic itself
+drifts enough to hurt balanced accuracy. July 7 has the highest attack share and the
+largest drift magnitude, but its median window is nearly undamaged because the attack
+families there are concentrated and easy for the classifier.
 
-Only `drift_magnitude` and `cardinality_shift` vary in this stream. The other three
-corruption features are constant zero, and their fitted coefficients are zero. The
-drift-only ablation is slightly better on test (MAE 0.0385 versus 0.0405), so this benchmark
-validates drift and cardinality damage, not missingness, schema, or volume. The five-feature
-model still beats the untrained heuristic by a wide margin.
+The five-feature predictor is trained on a chronological 60/20/20 split (222 train, 74
+validation, 74 test windows). Test metrics with bootstrap confidence intervals:
+
+| Predictor | Test MAE | Test RMSE | Test R? |
+|---|---:|---:|---:|
+| Five-feature model | 0.1097 | 0.1710 | 0.7503 |
+| Five-feature 95% CI | 0.0833 to 0.1415 | n/a | 0.7507 to 0.8935 |
+| Drift-only OLS | 0.0951 | 0.1196 | 0.9252 |
+| Prior-only oracle | 0.0604 | 0.0685 | 0.9901 |
+| Untrained heuristic | 0.1510 | 0.2151 | 0.7997 |
+| Balanced-target model | 0.2006 | 0.2239 | -0.0204 |
+
+Training metrics are MAE 0.0524, RMSE 0.0776, and R? 0.9536. Validation R? is -13.65
+because the validation block crosses a regime change and has low target variance; use MAE
+0.4483 there rather than R?.
+
+The prior-only row is an oracle: it uses the true window attack share, which is unavailable
+at prediction time. It shows that most raw damage in this stream is class-prior movement.
+The deployable five-feature model beats the untrained heuristic, but drift magnitude alone
+is slightly better on this test slice (MAE 0.0951 versus 0.1097). Missingness, schema, and
+volume are constant zero in CICIDS, and cardinality adds more noise than signal here. The
+balanced-target model does not generalize (R? -0.0204), so the vector tracks prior-driven
+damage better than concept-driven damage.
 
 ## Design choices
 
@@ -308,9 +342,10 @@ tests/                unit and regression tests
 
 ## Limitations
 
-- The published benchmark uses one real stream with a curated drift order. Only two of the
-  five corruption features vary, the reference period is not stationary, and the linear
-  damage model should be retrained on deployment-specific labels.
+- The published benchmark uses one real dataset, CICIDS2017. Attack prevalence moves from
+  0% to 41% across days, only `drift_magnitude` and `cardinality_shift` vary, and default
+  alerts fire on benign temporal drift. The linear damage model should be retrained on
+  deployment-specific labels.
 - Detection quality depends on window size, monitor thresholds, and the kind of drift.
 - The library has no built-in database, scheduler, or hosted dashboard. It produces
   reports and leaves storage and delivery to the caller.
