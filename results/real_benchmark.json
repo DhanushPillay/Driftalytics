@@ -1,107 +1,152 @@
 {
-  "dataset": "insects_incremental_abrupt_balanced",
-  "total_rows": 79986,
-  "reference_rows": 20000,
-  "live_rows": 59986,
-  "window_size": 500,
-  "windows": 119,
-  "classifier": "StandardScaler + LogisticRegression(max_iter=3000)",
-  "reference_model": {
-    "accuracy": 0.63985,
-    "error": 0.36015,
-    "log_loss": 0.888009
+  "dataset": "cicids2017",
+  "total_rows": 2827677,
+  "reference_day": "2017-07-03",
+  "attack_day": "2017-07-04",
+  "live_days": [
+    "2017-07-05",
+    "2017-07-06",
+    "2017-07-07"
+  ],
+  "train_rows": 63832,
+  "train_benign_rows": 50000,
+  "train_attack_rows": 13832,
+  "control_rows": 50000,
+  "live_rows": 1852586,
+  "window_size": 5000,
+  "windows": 370,
+  "classifier": "StandardScaler + LogisticRegression(class_weight=balanced)",
+  "control_metrics": {
+    "n_rows": 50000,
+    "accuracy": 0.95452,
+    "error": 0.04548,
+    "balanced_error": 0.04548,
+    "log_loss": 0.088039,
+    "attack_share": 0.0
   },
-  "detection": {
-    "severe_damage_threshold": 0.5,
-    "severe_windows": 22,
-    "per_monitor": {
-      "psi": {
-        "alerts": 93,
-        "alert_rate": 0.7815,
-        "precision": 0.2366,
-        "recall": 1.0
-      },
-      "ks": {
-        "alerts": 119,
-        "alert_rate": 1.0,
-        "precision": 0.1849,
-        "recall": 1.0
-      },
-      "wasserstein": {
-        "alerts": 119,
-        "alert_rate": 1.0,
-        "precision": 0.1849,
-        "recall": 1.0
-      },
-      "missing_rate": {
-        "alerts": 0,
-        "alert_rate": 0.0,
-        "precision": 0.0,
-        "recall": 0.0
-      },
-      "cardinality": {
-        "alerts": 0,
-        "alert_rate": 0.0,
-        "precision": 0.0,
-        "recall": 0.0
-      },
-      "drift_magnitude": {
-        "alerts": 19,
-        "alert_rate": 0.1597,
-        "precision": 1.0,
-        "recall": 0.8636
-      }
+  "live_attack_counts": {
+    "BENIGN": 1309863,
+    "DoS Hulk": 230123,
+    "PortScan": 158804,
+    "DDoS": 128025,
+    "DoS GoldenEye": 10293,
+    "DoS slowloris": 5796,
+    "DoS Slowhttptest": 5499,
+    "Bot": 1956,
+    "Web Attack \u2013 Brute Force": 1507,
+    "Web Attack \u2013 XSS": 652,
+    "Infiltration": 36,
+    "Web Attack \u2013 Sql Injection": 21,
+    "Heartbleed": 11,
+    "FTP-Patator": 0,
+    "SSH-Patator": 0
+  },
+  "damage_summary": {
+    "damage_mean": 0.238091,
+    "damage_std": 0.340119,
+    "damage_min": 0.0,
+    "damage_max": 0.95312,
+    "balanced_damage_mean": 0.245257,
+    "balanced_damage_std": 0.247781,
+    "windows": 370,
+    "windows_zero_damage": 102,
+    "windows_above_0_5": 97
+  },
+  "damage_by_day": {
+    "2017-07-05": {
+      "windows": 139,
+      "damage_mean": 0.354173,
+      "damage_median": 0.04732,
+      "damage_max": 0.93792,
+      "balanced_damage_mean": 0.278219,
+      "attack_share_mean": 0.36219,
+      "accuracy_error_mean": 0.397616,
+      "drift_magnitude_mean": 1.439154,
+      "cardinality_shift_mean": 0.297156
+    },
+    "2017-07-06": {
+      "windows": 91,
+      "damage_mean": 0.152634,
+      "damage_median": 0.02852,
+      "damage_max": 0.74052,
+      "balanced_damage_mean": 0.286024,
+      "attack_share_mean": 0.00487,
+      "accuracy_error_mean": 0.195956,
+      "drift_magnitude_mean": 0.446569,
+      "cardinality_shift_mean": 0.216368
+    },
+    "2017-07-07": {
+      "windows": 140,
+      "damage_mean": 0.178384,
+      "damage_median": 0.00722,
+      "damage_max": 0.95312,
+      "balanced_damage_mean": 0.186031,
+      "attack_share_mean": 0.41241,
+      "accuracy_error_mean": 0.213354,
+      "drift_magnitude_mean": 2.307276,
+      "cardinality_shift_mean": 0.398103
     }
   },
   "damage_predictor": {
-    "target": "absolute classification-error increase over the reference period",
+    "target": "absolute classification-error increase over the held-out control",
     "split": "chronological 60/20/20",
-    "train_rows": 73,
-    "validation_rows": 23,
-    "test_rows": 23,
+    "train_rows": 222,
+    "validation_rows": 74,
+    "test_rows": 74,
     "train_metrics": {
-      "mae": 0.05300070297746508,
-      "rmse": 0.08504186589023106,
-      "r2": 0.8790227252562026
+      "mae": 0.052420526110082084,
+      "rmse": 0.07762366819791944,
+      "r2": 0.9535925512225947
     },
     "validation_metrics": {
-      "mae": 0.022423978100152002,
-      "rmse": 0.03928653958238958,
-      "r2": -5.294266956253216
+      "mae": 0.44834050826999367,
+      "rmse": 0.6411216032643214,
+      "r2": -13.653143041780465
     },
     "test_metrics": {
-      "mae": 0.04054322472891409,
-      "rmse": 0.05362255157022671,
-      "r2": 0.9525183519655709
+      "mae": 0.10972719313213658,
+      "rmse": 0.17102059947345477,
+      "r2": 0.7503110286219067
     },
-    "heuristic_validation_metrics": {
-      "mae": 0.041046,
-      "rmse": 0.044527,
-      "r2": -0.38266
+    "test_metrics_95ci": {
+      "rounds": 1000,
+      "mae_95ci": [
+        0.083293,
+        0.141451
+      ],
+      "r2_95ci": [
+        0.750678,
+        0.893464
+      ]
+    },
+    "balanced_target_test_metrics": {
+      "mae": 0.2006054837501293,
+      "rmse": 0.22394786605593503,
+      "r2": -0.02038338131307804
     },
     "heuristic_test_metrics": {
-      "mae": 0.184333,
-      "rmse": 0.245453,
-      "r2": 0.419755
+      "mae": 0.150971,
+      "rmse": 0.215064,
+      "r2": 0.799719
     },
-    "drift_only_validation_metrics": {
-      "mae": 0.028391,
-      "rmse": 0.051231,
-      "r2": -6.416129
+    "prior_only_test_metrics": {
+      "mae": 0.060403,
+      "rmse": 0.068494,
+      "r2": 0.990076
     },
     "drift_only_test_metrics": {
-      "mae": 0.038507,
-      "rmse": 0.050073,
-      "r2": 0.960545
+      "mae": 0.095118,
+      "rmse": 0.119622,
+      "r2": 0.925217
     },
     "coefficients": {
-      "drift_magnitude": 1.308926,
-      "missingness_delta": 0.0,
-      "cardinality_shift": 34.907286,
+      "drift_magnitude": 0.091439,
+      "missingness_delta": -0.0,
+      "cardinality_shift": 1.242581,
       "schema_change": 0.0,
       "volume_delta": 0.0
     },
-    "intercept": -0.559837,
-    "caveat": "Damage labels are observed error increases on a curated real stream. Only drift_magnitude and cardinality_shift vary in this dataset; missingness, schema, and volume dimensions are constant. The model is linear and should be retrained on deployment-specific labels."
+    "intercept": -0.150846,
+    "caveat": "Each day has a different attack mix and benign traffic changes across days, so damage combines concept drift with class-prior change. Compare raw error with the balanced-error target and the prior-only baseline."
   }
 }
