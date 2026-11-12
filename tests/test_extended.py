@@ -5,6 +5,7 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 from driftalytics import (
     CorruptionVector,
@@ -16,7 +17,7 @@ from driftalytics import (
     compute_corruption_vector,
 )
 from driftalytics.cli import _as_bool, run_config
-from driftalytics.datasets import COLUMNS, load_insects
+from driftalytics.datasets import COLUMNS, FEATURES, load_cicids
 from driftalytics.llm import LLMJudge, OpenAIProvider
 from driftalytics.monitors.llm_monitors import LLMMonitor
 from driftalytics.monitors.performance import (
@@ -190,6 +191,60 @@ def test_ks_requires_effect_size():
     monitor = KSMonitor(alpha=0.05, min_effect=0.5)
     assert monitor.on_batch(ref, small).alert is False
     assert monitor.on_batch(ref, large).alert is True
+
+
+def test_ks_uses_asymptotic_for_large_samples(monkeypatch):
+    calls = []
+    real = stats.ks_2samp
+
+    def fake(reference, batch, method="auto"):
+        calls.append(method)
+        return real(reference, batch, method=method)
+
+    monkeypatch.setattr("driftalytics.monitors.tabular.stats.ks_2samp", fake)
+    monitor = KSMonitor()
+    monitor.on_batch(_data(2000, 0), _data(2000, 1, shift=1.0))
+    assert calls == ["asymp", "asymp"]
+
+    calls.clear()
+    monitor = KSMonitor()
+    monitor.on_batch(_data(100, 0), _data(100, 1, shift=1.0))
+    assert calls == ["exact", "exact"]
+
+
+def test_ks_caches_reference_values(monkeypatch):
+    ref = _data(2000, 0)
+    monitor = KSMonitor()
+    monitor.on_batch(ref, _data(1000, 1))
+    cached = monitor._cached_values
+    monitor.on_batch(ref, _data(1000, 2))
+    assert monitor._cached_values is cached
+
+
+def test_corruption_vector_handles_near_zero_scale():
+    reference = pd.DataFrame(
+        {
+            "constant": np.full(100, 1.0),
+            "tiny": np.linspace(1e-15, 2e-15, 100),
+        }
+    )
+    batch = pd.DataFrame(
+        {
+            "constant": np.full(100, 2.0),
+            "tiny": np.linspace(3e-15, 4e-15, 100),
+        }
+    )
+    vector = compute_corruption_vector(reference, batch)
+    assert np.isfinite(vector.drift_magnitude)
+    assert vector.drift_magnitude < 100.0
+
+
+def test_wasserstein_handles_near_zero_scale():
+    reference = pd.DataFrame({"a": np.linspace(1e-15, 2e-15, 100)})
+    batch = pd.DataFrame({"a": np.linspace(3e-15, 4e-15, 100)})
+    result = WassersteinMonitor().on_batch(reference, batch)
+    assert np.isfinite(result.score)
+    assert result.score < 1.0
 
 
 def test_schema_and_volume_monitors():
@@ -651,15 +706,22 @@ def test_train_damage_rejects_missing_file(tmp_path):
         train_and_save(str(tmp_path / "model.json"), str(tmp_path / "missing.csv"))
 
 
-def test_load_insects_parses_headerless_fixture(tmp_path):
-    path = tmp_path / "insects.csv"
-    first = ",".join(str(value) for value in range(1, 34)) + ",2"
-    second = ",".join(str(value) for value in range(2, 35)) + ",3"
-    path.write_text(f"{first}\n{second}\n", encoding="utf-8")
-    frame = load_insects(path, validate=False)
+def test_load_cicids_parses_and_sorts_fixture(tmp_path):
+    path = tmp_path / "cicids.parquet"
+    attacks = {"attack_label": "DDoS", "Timestamp": "7/7/2017 9:59"}
+    benign = {"attack_label": "BENIGN", "Timestamp": "03/07/2017 01:00:01"}
+    rows = []
+    for index, base in enumerate([attacks, benign]):
+        row = {feature: float(index + 1) for feature in FEATURES}
+        row.update(base)
+        rows.append(row)
+    pd.DataFrame(rows).to_parquet(path)
+
+    frame = load_cicids(path, validate=False)
     assert list(frame.columns) == COLUMNS
-    assert frame.shape == (2, 34)
-    assert frame["class"].tolist() == [2, 3]
+    assert frame["label"].tolist() == [0, 1]
+    assert frame["timestamp"].is_monotonic_increasing
+    assert frame["attack_label"].tolist() == ["BENIGN", "DDoS"]
 
 
 def test_monitor_edge_cases_and_validation():
@@ -667,6 +729,7 @@ def test_monitor_edge_cases_and_validation():
     for constructor in (
         lambda: PSIMonitor(threshold=-1),
         lambda: KSMonitor(alpha=float("nan")),
+        lambda: KSMonitor(exact_threshold=0),
         lambda: MissingRateMonitor(threshold=float("inf")),
         lambda: VolumeMonitor(expected_size=-1),
     ):
