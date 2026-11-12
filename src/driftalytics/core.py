@@ -101,6 +101,39 @@ def expected_cardinality(series, sample_size: int) -> float:
     return float(np.sum(1.0 - (1.0 - shares) ** sample_size))
 
 
+def psi(reference, batch, n_bins: int = 10) -> float:
+    """Population stability index between two samples of one column."""
+    import numpy as np
+    import pandas as pd
+
+    if n_bins <= 0:
+        raise ValueError("n_bins must be greater than 0")
+
+    def finite_values(values):
+        if isinstance(values, pd.Series):
+            array = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+        else:
+            array = np.asarray(values, dtype=float).ravel()
+        return array[np.isfinite(array)]
+
+    reference_values = finite_values(reference)
+    batch_values = finite_values(batch)
+    if not len(reference_values) or not len(batch_values):
+        return 0.0
+
+    quantiles = np.unique(np.quantile(reference_values, np.linspace(0, 1, n_bins + 1)))
+    if len(quantiles) < 2:
+        edges = np.array([-np.inf, float(reference_values[0]), np.inf])
+    else:
+        edges = np.concatenate(([-np.inf], quantiles[1:-1], [np.inf]))
+
+    reference_counts, _ = np.histogram(reference_values, bins=edges)
+    batch_counts, _ = np.histogram(batch_values, bins=edges)
+    reference_share = np.clip(reference_counts / max(len(reference_values), 1), 1e-6, None)
+    batch_share = np.clip(batch_counts / max(len(batch_values), 1), 1e-6, None)
+    return float(np.sum((batch_share - reference_share) * np.log(batch_share / reference_share)))
+
+
 def compute_corruption_vector(
     reference,
     batch,
@@ -140,15 +173,10 @@ def compute_corruption_vector(
             pd.api.types.is_numeric_dtype(reference[c]) and pd.api.types.is_numeric_dtype(batch[c])
         ):
             continue
-        ref_values = pd.to_numeric(reference[c], errors="coerce").dropna()
-        batch_values = pd.to_numeric(batch[c], errors="coerce").dropna()
-        if ref_values.empty or batch_values.empty:
+        if reference[c].dropna().empty or batch[c].dropna().empty:
             continue
-        scale = float(ref_values.std(ddof=0))
-        if not np.isfinite(scale) or scale == 0.0:
-            scale = 1.0
-        drifts.append(abs(float(batch_values.mean()) - float(ref_values.mean())) / scale)
-    cv.drift_magnitude = float(np.mean(drifts)) if drifts else 0.0
+        drifts.append(psi(reference[c], batch[c]))
+    cv.drift_magnitude = float(max(drifts)) if drifts else 0.0
 
     changes = 0
     for c in reference.columns:
