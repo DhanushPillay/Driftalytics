@@ -15,7 +15,7 @@ drift or more degradation, so the same threshold rule applies.
 | `chi_square` | Cramer's V for categorical columns, maximum | any column passes BH correction at `alpha` (0.05) and reaches `min_effect` (0.1) |
 | `volume` | Relative row-count deviation from `expected_size` | score > `threshold` (0.2) |
 | `schema_change` | Fraction of union columns that are missing, new, or retyped | score > `threshold` (0.0) |
-| `drift_magnitude` | Mean standardized numeric shift from the corruption vector | score > `threshold` (0.5) |
+| `drift_magnitude` | Maximum PSI across numeric columns from the corruption vector | score > `threshold` (0.5) |
 
 Notes:
 
@@ -24,6 +24,9 @@ Notes:
 - `ks` and `chi_square` apply Benjamini-Hochberg correction across tested columns. The
   reported score is the maximum statistic, but the alert comes from the corrected
   per-column decisions.
+- `ks` uses the exact test only when both samples are at most `exact_threshold` rows
+  (1,000 by default); larger samples use the asymptotic test. The chosen method per column
+  is reported in `details["methods"]`.
 - `cardinality` compares the batch's distinct-value count with the number expected in a
   sample of that size, not with the full reference count. This avoids false alerts when
   windows are smaller than the reference. For continuous columns, added noise or increased
@@ -91,7 +94,7 @@ for partial tails, then restores it.
 
 Each run that needs it computes a `CorruptionVector` with these fields:
 
-- `drift_magnitude`: mean absolute standardized mean shift across numeric columns.
+- `drift_magnitude`: maximum Population Stability Index across numeric columns.
 - `missingness_delta`: mean absolute missing-rate change across common columns.
 - `cardinality_shift`: mean relative difference from expected sample cardinality.
 - `schema_change`: fraction of union columns added, removed, or retyped.
