@@ -11,6 +11,58 @@ inspectable vector and uses it as an early-warning signal.
 
 > Status: v0.5.0, early development. APIs may change before 1.0.
 
+## Install
+
+Python 3.10 or newer. The package is not published to PyPI yet, so install from a
+checkout:
+
+```bash
+pip install -e .
+pip install -e ".[parquet]"  # parquet input
+pip install -e ".[dev]"      # development tools
+```
+
+The package ships a `py.typed` marker, and both the `driftalytics` console script and
+`python -m driftalytics` work.
+
+## Quick start
+
+```python
+import pandas as pd
+
+from driftalytics import SlidingWindowRunner
+
+reference = pd.read_parquet("data/reference.parquet")
+live = pd.read_parquet("data/live.parquet")
+
+runner = SlidingWindowRunner(
+    reference=reference,
+    monitors=["psi", "ks", "missing_rate", "schema_change"],
+    window_size=1_000,
+)
+report = runner.run(live)
+print(report.summary())
+report.to_html("drift_report.html")
+report.to_json("drift_report.json")
+```
+
+Config-driven runs and monitor discovery:
+
+```bash
+driftalytics run examples/config.yaml
+driftalytics monitors
+```
+
+Train a damage predictor from labeled corruption vectors:
+
+```bash
+driftalytics train-damage --data scenarios.csv --out models/damage_predictor.json
+```
+
+`Report.results` holds the final analyzed window. Per-window results and corruption vectors
+are in `report.window_summaries`; alerts and corruptions aggregate across the run.
+`DRIFTALYTICS_DATA_DIR` relocates the benchmark dataset cache.
+
 ## What it does
 
 - Watches reference data against live batches or an incoming stream.
@@ -321,13 +373,17 @@ src/driftalytics/     library code
   datasets.py         benchmark dataset download, cache, and validation
   report.py           HTML and JSON rendering
   llm.py              provider-agnostic judge
-benchmarks/           real-data benchmarks
+  py.typed            PEP 561 typing marker
+benchmarks/           real-data benchmark scripts and their README
 docs/                 architecture, monitors, API, decisions
 examples/             example configuration
 notebooks/            executable walkthroughs
 results/              recorded benchmark outputs
-tests/                unit and regression tests
+tests/                domain-focused unit and regression tests
 ```
+
+The docs site is configured in `mkdocs.yml`. Run `mkdocs serve` for a local preview or
+`mkdocs build --strict` for the same check used by CI.
 
 ## Documentation
 
@@ -338,7 +394,7 @@ tests/                unit and regression tests
 - [Benchmarking](docs/benchmarking.md)
 - [API reference](docs/api-reference.md)
 - [Design decisions](docs/decisions.md)
-- [Contributing](docs/contributing.md)
+- [Development](docs/development.md)
 
 ## Limitations
 
