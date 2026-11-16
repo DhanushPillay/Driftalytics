@@ -6,6 +6,7 @@ __pycache__/
 .Python
 build/
 dist/
+site/
 *.egg-info/
 .eggs/
 
@@ -13,6 +14,7 @@ dist/
 .venv/
 venv/
 env/
+.venv-wheel/
 
 # Tooling caches
 .pytest_cache/
