@@ -1,0 +1,46 @@
+site_name: Driftalytics
+site_description: Lightweight ML/LLM drift monitoring with early-warning damage prediction.
+site_url: https://dhanushpillay.github.io/Driftalytics/
+repo_url: https://github.com/DhanushPillay/Driftalytics
+repo_name: DhanushPillay/Driftalytics
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Architecture: architecture.md
+  - Monitors: monitors.md
+  - LLM evaluation: llm-eval.md
+  - Benchmarking: benchmarking.md
+  - API reference: api-reference.md
+  - Design decisions: decisions.md
+  - Development: development.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+strict: true
