@@ -76,6 +76,13 @@ def _corruption_dict(corruption: CorruptionVector) -> dict[str, float]:
 
 @dataclass
 class Report:
+    """Aggregated outcome of a run.
+
+    For multi-window runs, ``results`` holds the monitor results from the final
+    analyzed window only. Use ``window_summaries`` for per-window detail; the
+    alert list and corruption vectors cover every analyzed window.
+    """
+
     results: list[MonitorResult] = field(default_factory=list)
     alerts: list[Alert] = field(default_factory=list)
     n_rows: int = 0
@@ -191,6 +198,45 @@ class Report:
                 f"<p class='error'>Damage prediction failed: {html.escape(self.damage_error)}</p>"
             )
 
+        window_html = "".join(
+            "<tr>"
+            f"<td>{window.get('window', '')}</td>"
+            f"<td>{window.get('start', '')}</td>"
+            f"<td>{window.get('end', '')}</td>"
+            f"<td>{window.get('n_rows', '')}</td>"
+            f"<td>{_fmt(window.get('damage_estimate'))}</td>"
+            f"<td>{len(window.get('alerts', []))}</td>"
+            "</tr>"
+            for window in self.window_summaries
+        )
+        windows = (
+            "<h2>Windows</h2>\n"
+            "<table>\n"
+            "<thead><tr><th>Window</th><th>Start</th><th>End</th><th>Rows</th>"
+            "<th>Estimated damage</th><th>Alerts</th></tr></thead>\n"
+            f"<tbody>{window_html}</tbody>\n"
+            "</table>\n"
+            if self.window_summaries
+            else ""
+        )
+
+        corruption_header = "".join(
+            f"<th>{html.escape(name)}</th>" for name in CorruptionVector.feature_names
+        )
+        corruption_html = "".join(
+            "<tr>" + "".join(f"<td>{_fmt(value)}</td>" for value in corruption.to_list()) + "</tr>"
+            for corruption in self.corruptions
+        )
+        corruptions = (
+            "<h2>Corruption vectors</h2>\n"
+            "<table>\n"
+            f"<thead><tr>{corruption_header}</tr></thead>\n"
+            f"<tbody>{corruption_html}</tbody>\n"
+            "</table>\n"
+            if self.corruptions
+            else ""
+        )
+
         document = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -215,6 +261,7 @@ code {{ font-size: 0.85rem; }}
 <thead><tr><th>Monitor</th><th>Score</th><th>Threshold</th><th>Alert</th><th>Status</th><th>Error</th><th>Details</th></tr></thead>
 <tbody>{row_html}</tbody>
 </table>
+{windows}{corruptions}
 <h2>Alerts</h2>
 <table>
 <thead><tr><th>Window</th><th>Start</th><th>End</th><th>Monitor</th><th>Score</th><th>Threshold</th><th>Message</th></tr></thead>
