@@ -50,6 +50,8 @@ reference data  +  live batches
   and test metrics.
 - **`LLMJudge`**: provider-agnostic judge with cache, sampling, retries, and token budget.
 - **`Report`**: aggregates results and window summaries. Renders escaped HTML and JSON.
+  `results` contains the final analyzed window; `window_summaries` contains every window;
+  alerts and corruption vectors aggregate across the run.
 
 ## Window semantics
 
