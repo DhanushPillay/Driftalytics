@@ -80,6 +80,13 @@ def run_config(config_path: str) -> int:
     return 0
 
 
+def train_damage_command(data_path: str, out_path: str, test_size: float) -> int:
+    from .train_damage import train_and_save
+
+    train_and_save(out_path, data_path, test_size=test_size)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="driftalytics", description="Driftalytics CLI")
     parser.add_argument("--version", action="version", version=f"driftalytics {__version__}")
@@ -89,6 +96,20 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("config", help="Path to YAML config")
 
     subparsers.add_parser("monitors", help="List registered monitors")
+
+    train_parser = subparsers.add_parser(
+        "train-damage", help="Train a damage predictor from labeled windows"
+    )
+    train_parser.add_argument("--data", required=True, help="CSV or Parquet training data")
+    train_parser.add_argument(
+        "--out",
+        default="models/damage_predictor.json",
+        help="Output model path",
+    )
+    train_parser.add_argument(
+        "--test-size", type=float, default=0.2, help="Validation and test fraction"
+    )
+
     args = parser.parse_args(argv)
 
     try:
@@ -97,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "monitors":
             print("\n".join(MonitorRegistry.list()))
             return 0
+        if args.command == "train-damage":
+            return train_damage_command(args.data, args.out, args.test_size)
         parser.print_help()
         return 0
     except Exception as exc:
