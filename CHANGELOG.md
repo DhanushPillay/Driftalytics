@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `python -m driftalytics` support through a package `__main__` module.
+- `driftalytics train-damage` subcommand, reusing `train_and_save`.
+- `py.typed` marker for downstream type checkers.
+- `DRIFTALYTICS_DATA_DIR` for relocating the CICIDS cache, plus memoized SHA-256
+  verification.
+- Bounded LLM judge cache through `max_cache_size`.
+- Window summary and corruption vector tables in HTML reports.
+- MkDocs site configuration, pre-commit hooks, package and docs CI jobs, benchmark README,
+  security policy, issue templates, pull request template, and Dependabot.
+- Tests for the cache bound, HTML window tables, `train-damage`, and cache path override.
+
+### Changed
+
+- Version is sourced from `driftalytics.version` instead of being duplicated in
+  `pyproject.toml`.
+- Package metadata uses PEP 639 license fields and project URLs.
+- Tests are split by domain instead of two monolithic files, and the `sys.path` shim is
+  gone.
+- Coverage now fails below 70%, with `__main__` excluded.
+
+### Fixed
+
+- Getting-started training command now includes the required `--data` argument.
+- API reference documents the real `train_and_save(out_path, data_path, test_size)` signature.
+- Stale v0.3 wording in the LLM guide and the incorrect loader claim about dropping constant
+  columns.
+- Notebook 02 provider signature and notebook 03 training call, which raised `TypeError`.
+- Notebook 04 wording now reflects the real CICIDS benchmarks.
+
 ## 0.5.0
 
 ### Changed
