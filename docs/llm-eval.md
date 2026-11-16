@@ -1,7 +1,7 @@
 # LLM evaluation
 
 LLM judging is cost-bounded by design: identical requests are cached, traffic can be
-sampled, and every run has a token budget. There is no batching layer in v0.3.
+sampled, and every run has a token budget. There is no batching layer in v0.5.
 
 ## Setup
 
@@ -19,13 +19,13 @@ export ANTHROPIC_API_KEY=...    # Anthropic
 from driftalytics.llm import LLMJudge
 
 judge = LLMJudge(
-    provider="openai",          # "openai", "anthropic", or "ollama"
+    provider="openai",  # "openai", "anthropic", or "ollama"
     model="gpt-4o-mini",
     metrics=["faithfulness", "answer_relevance"],
-    budget_tokens=50_000,       # hard cap for this judge instance
-    sample_rate=0.1,            # judge about 10% of requests
-    cache=True,                 # reuse identical requests
-    max_output_tokens=256,      # cap the judge's reply
+    budget_tokens=50_000,  # hard cap for this judge instance
+    sample_rate=0.1,  # judge about 10% of requests
+    cache=True,  # reuse identical requests
+    max_output_tokens=256,  # cap the judge's reply
 )
 results = judge.evaluate(questions, contexts, answers)
 ```
