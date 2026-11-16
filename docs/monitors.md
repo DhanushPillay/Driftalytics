@@ -70,6 +70,7 @@ fabricated value.
 ```python
 from driftalytics import Monitor, MonitorResult, register_monitor
 
+
 class RowCountMonitor(Monitor):
     name = "row_count"
 
@@ -81,6 +82,7 @@ class RowCountMonitor(Monitor):
             alert=delta > 0.5,
             threshold=0.5,
         )
+
 
 register_monitor("row_count", RowCountMonitor)
 ```
