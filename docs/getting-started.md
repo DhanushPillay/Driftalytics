@@ -89,6 +89,7 @@ after finalization raises `RuntimeError`.
 ```python
 from driftalytics import Monitor, MonitorResult, register_monitor
 
+
 class RowCountMonitor(Monitor):
     name = "row_count"
 
@@ -100,6 +101,7 @@ class RowCountMonitor(Monitor):
             alert=delta > 0.5,
             threshold=0.5,
         )
+
 
 register_monitor("row_count", RowCountMonitor)
 ```
@@ -141,12 +143,16 @@ damage_predictor: models/damage_predictor.json
 Train one with:
 
 ```bash
-python -m driftalytics.train_damage --out models/damage_predictor.json
+python -m driftalytics.train_damage --data scenarios.csv --out models/damage_predictor.json
+# or, with the CLI:
+driftalytics train-damage --data scenarios.csv --out models/damage_predictor.json
 ```
 
-Training uses separate train, validation, and test splits and saves all three metric sets in
-the JSON model. The saved `metrics` field is the training metric for backward compatibility;
-use `validation_metrics` and `test_metrics` for generalization.
+Training uses separate chronological train, validation, and test splits. `test_size` defaults
+to `0.2` and applies to both the validation and test portions, so the default split is 60/20/20.
+All three metric sets are saved in the JSON model. The saved `metrics` field is the training
+metric for backward compatibility; use `validation_metrics` and `test_metrics` for
+generalization.
 
 ## Next steps
 
