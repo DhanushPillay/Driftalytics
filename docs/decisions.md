@@ -76,8 +76,9 @@ patator, DoS, web, bot, DDoS, and port-scan traffic, so they supply natural drif
 injected corruption.
 
 The loader downloads the parquet file on demand, verifies its SHA-256, parses mixed timestamp
-formats, drops constant columns, and caches the file under `data/raw/`. The dataset is not
-committed. Its Apache-2.0 license is separate from the library's MIT license.
+formats, selects the curated 68-feature set, and caches the file under `data/raw/` (override
+with `DRIFTALYTICS_DATA_DIR`). The dataset is not committed. Its Apache-2.0 license is
+separate from the library's MIT license.
 
 The detection benchmark draws an exchangeable reference and control split from each day's
 benign traffic, then streams the rest of the day chronologically. Benign temporal drift alone
