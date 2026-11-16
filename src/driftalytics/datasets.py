@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import urllib.request
 from pathlib import Path
 
@@ -16,7 +17,14 @@ DOWNLOAD_URL = (
 SHA256 = "e64f6adfbcb7f96b018cf36c731be64ef4de3353ccd7340b190590734a0dda35"
 EXPECTED_ROWS = 2_827_677
 EXPECTED_ATTACKS = 556_555
-CACHE_PATH = Path("data/raw/cicids2017/CICIDS_Flow.parquet")
+
+
+def _default_cache_path() -> Path:
+    root = Path(os.environ.get("DRIFTALYTICS_DATA_DIR", "data"))
+    return root / "raw" / "cicids2017" / "CICIDS_Flow.parquet"
+
+
+CACHE_PATH = _default_cache_path()
 
 FEATURES = [
     "Flow Duration",
@@ -99,6 +107,23 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+_VERIFIED: set[tuple[str, int, int]] = set()
+
+
+def _stat_key(path: Path) -> tuple[str, int, int]:
+    stat = path.stat()
+    return (str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+
+
+def _verify(path: Path) -> None:
+    key = _stat_key(path)
+    if key in _VERIFIED:
+        return
+    if _sha256(path) != SHA256:
+        raise ValueError(f"checksum mismatch for {path}; delete it and retry")
+    _VERIFIED.add(key)
+
+
 def _download(destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".part")
@@ -110,6 +135,7 @@ def _download(destination: Path) -> None:
         if _sha256(temporary) != SHA256:
             raise ValueError(f"checksum mismatch for {DATASET_NAME}")
         temporary.replace(destination)
+        _VERIFIED.add(_stat_key(destination))
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
@@ -119,15 +145,16 @@ def load_cicids(path: str | Path | None = None, *, validate: bool = True) -> pd.
     """Load CICIDS2017 network flows as a timestamped binary classification frame.
 
     The parquet file is downloaded on demand and checked against the published
-    SHA-256. Features are stored as ``float32`` to keep the 2.8M-row frame
-    practical; ``label`` is 0 for benign flows and 1 for attacks.
+    SHA-256. Set ``DRIFTALYTICS_DATA_DIR`` to change the cache root (default:
+    ``data`` relative to the current working directory). Features are stored as
+    ``float32`` to keep the 2.8M-row frame practical; ``label`` is 0 for benign
+    flows and 1 for attacks.
     """
     if path is None:
-        source = CACHE_PATH
+        source = _default_cache_path()
         if not source.exists():
             _download(source)
-        if _sha256(source) != SHA256:
-            raise ValueError(f"checksum mismatch for {source}; delete it and retry")
+        _verify(source)
     else:
         source = Path(path)
 
