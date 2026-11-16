@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible problem with Driftalytics
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please search existing issues first. For security problems,
+        use the private advisory link in SECURITY.md instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+      placeholder: A monitor returned the wrong status, an install failed, and so on.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal code, config, or commands that reproduce the issue.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Fill in the versions that apply.
+      value: |
+        - Driftalytics version:
+        - Python version:
+        - Operating system:
+        - Install method: pip / editable / wheel
+        - Optional extras: parquet / bench / dev / none
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Tracebacks or logs. Remove API keys and private data first.
+      render: text
+    validations:
+      required: false
