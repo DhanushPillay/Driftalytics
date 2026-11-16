@@ -81,10 +81,14 @@ Fields include `results`, `alerts`, `n_rows`, `n_rows_analyzed`, `n_rows_skipped
 `damage_estimate`, `damage_error`, `corruptions`, `n_windows`, `window_summaries`, `start`,
 and `end`.
 
+For multi-window runs, `results` holds the final analyzed window's monitor results.
+`window_summaries` contains per-window results, alerts, corruption vectors, and damage
+estimates. The top-level `alerts` and `corruptions` aggregate every analyzed window.
+
 - `summary() -> str`
 - `to_dict() -> dict`
 - `to_json(path) -> None` (non-finite values become `null`)
-- `to_html(path) -> None` (non-finite values render as `n/a`)
+- `to_html(path) -> None` (non-finite values render as `n/a`; includes window and corruption tables)
 
 ### `Alert`
 
@@ -118,13 +122,15 @@ heuristic weights.
 
 ### Training helper
 
-`driftalytics.train_damage.train_and_save(out_path, n, data_path, seed, test_size)`
+`driftalytics.train_damage.train_and_save(out_path, data_path, test_size=0.2)`
 
+The validation and test portions are both `test_size` of the rows, split chronologically.
 The CLI wrapper is:
 
 ```bash
-python -m driftalytics.train_damage --out models/damage_predictor.json
 python -m driftalytics.train_damage --data scenarios.csv --out models/damage_predictor.json
+# or:
+driftalytics train-damage --data scenarios.csv --out models/damage_predictor.json
 ```
 
 Training data needs the five corruption-vector columns plus `damage`.
@@ -135,7 +141,7 @@ Training data needs the five corruption-vector columns plus `damage`.
 
 ```python
 LLMJudge(
-    provider="openai",          # "openai", "anthropic", "ollama", or a provider object
+    provider="openai",  # "openai", "anthropic", "ollama", or a provider object
     model="gpt-4o-mini",
     metrics=["faithfulness", "answer_relevance"],
     budget_tokens=50_000,
