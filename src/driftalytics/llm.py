@@ -249,11 +249,14 @@ class LLMJudge:
         retries: int = 2,
         seed: int = 0,
         max_output_tokens: int = 256,
+        max_cache_size: int = 10_000,
     ):
         if budget_tokens < 0:
             raise ValueError("budget_tokens must be non-negative")
         if not 0.0 <= sample_rate <= 1.0:
             raise ValueError("sample_rate must be between 0 and 1")
+        if max_cache_size <= 0:
+            raise ValueError("max_cache_size must be positive")
         _validate_output_limit(max_output_tokens)
 
         self.provider_name = provider if isinstance(provider, str) else type(provider).__name__
@@ -263,6 +266,7 @@ class LLMJudge:
         self.sample_rate = sample_rate
         self.cache = cache
         self.max_output_tokens = max_output_tokens
+        self.max_cache_size = max_cache_size
         self._provider = (
             make_provider(
                 provider,
@@ -398,6 +402,8 @@ class LLMJudge:
             self._spent += max(0, used - reserved)
             if self.cache:
                 self._cache[key] = parsed
+                while len(self._cache) > self.max_cache_size:
+                    self._cache.pop(next(iter(self._cache)))
             results.append({**parsed, "_status": "ok", "_error": None})
 
         return results
