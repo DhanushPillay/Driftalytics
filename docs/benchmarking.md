@@ -30,13 +30,14 @@ and natural attacks over the following four days.
 | Cache | `data/raw/cicids2017/CICIDS_Flow.parquet` |
 | SHA-256 | `e64f6adfbcb7f96b018cf36c731be64ef4de3353ccd7340b190590734a0dda35` |
 
-The loader drops flow identifiers, IP addresses, ports, protocol, and eight constant columns,
-leaving 68 numeric features. It parses the mixed-format timestamps with `dayfirst=True`,
-maps benign rows to `0` and every attack label to `1`, sorts by timestamp, converts features
-to `float32`, and validates the expected row and attack counts. `src/driftalytics/datasets.py`
-downloads the Parquet file on demand, writes it through an atomic `.part` file, verifies the
-SHA-256, and caches it under `data/raw/`. The dataset is not committed. Pass `--path` to use
-an existing local copy without downloading.
+The curated feature set excludes flow identifiers, IP addresses, ports, protocol, and eight
+constant columns, leaving 68 numeric features. It parses the mixed-format timestamps with
+`dayfirst=True`, maps benign rows to `0` and every attack label to `1`, sorts by timestamp,
+converts features to `float32`, and validates the expected row and attack counts.
+`src/driftalytics/datasets.py` downloads the Parquet file on demand, writes it through an
+atomic `.part` file, verifies the SHA-256, and caches it under `data/raw/` (override with
+`DRIFTALYTICS_DATA_DIR`). The dataset is not committed. Pass `--path` to use an existing local
+copy without downloading.
 
 Daily composition:
 
